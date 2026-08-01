@@ -3,7 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { Card, Wordmark } from "../ui";
-import { formatQty, inventoryApi, type Material } from "../inventory/api";
+import {
+  formatQty,
+  inventoryApi,
+  matchesQuery,
+  sortMaterials,
+  type Material,
+  type SortKey,
+} from "../inventory/api";
 import { MaterialGauge } from "../inventory/Gauge";
 import { MaterialIcon } from "../inventory/MaterialIcon";
 import { MaterialForm } from "../inventory/MaterialForm";
@@ -47,13 +54,34 @@ export function DashboardPage() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [editing, setEditing] = useState<Material | null>(null);
 
+  const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState<string | null>(null);
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  const [sort, setSort] = useState<SortKey>("urgency");
+
   const all = useMemo(() => materials.data ?? [], [materials.data]);
   const categories = useMemo(() => [...new Set(all.map((m) => m.category))], [all]);
   const critical = all.filter((m) => m.status === "CRITICAL");
   const low = all.filter((m) => m.status === "LOW");
-  const purchasing = [...critical, ...low].sort(
-    (a, b) => a.stock.available / (a.lowStockThreshold || 1) - b.stock.available / (b.lowStockThreshold || 1),
+
+  const visible = useMemo(
+    () =>
+      sortMaterials(
+        all.filter(
+          (m) =>
+            matchesQuery(m, query) &&
+            (catFilter == null || m.category === catFilter) &&
+            (!attentionOnly || m.status !== "OK"),
+        ),
+        sort,
+      ),
+    [all, query, catFilter, attentionOnly, sort],
   );
+  const visibleCategories = categories.filter((c) => visible.some((m) => m.category === c));
+
+  const purchasing = visible
+    .filter((m) => m.status !== "OK" && m.lowStockThreshold != null)
+    .sort((a, b) => a.stock.available / (a.lowStockThreshold || 1) - b.stock.available / (b.lowStockThreshold || 1));
 
   if (!me.data) {
     return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
@@ -92,6 +120,63 @@ export function DashboardPage() {
         <Stat label="Materials" value={all.length} divider />
       </div>
 
+      {/* Filter & sort bar — applies to the wall and the purchasing panel */}
+      {all.length > 0 && (
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name, type, color…"
+            className="w-56 rounded-md border border-line bg-panel px-3 py-1.5 text-sm outline-none placeholder:text-mut focus:border-accent"
+          />
+          <button
+            type="button"
+            onClick={() => setCatFilter(null)}
+            aria-pressed={catFilter == null}
+            className={`rounded-full border px-3 py-1 text-sm ${catFilter == null ? "border-accent bg-accent font-semibold text-white" : "border-line text-ink2 hover:border-accent"}`}
+          >
+            All
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCatFilter(catFilter === c ? null : c)}
+              aria-pressed={catFilter === c}
+              className={`rounded-full border px-3 py-1 text-sm capitalize ${catFilter === c ? "border-accent bg-accent font-semibold text-white" : "border-line text-ink2 hover:border-accent"}`}
+            >
+              {c}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setAttentionOnly(!attentionOnly)}
+            aria-pressed={attentionOnly}
+            className={`rounded-full border px-3 py-1 text-sm ${attentionOnly ? "border-warn bg-warn/10 font-semibold text-warn" : "border-line text-ink2 hover:border-warn"}`}
+          >
+            Needs attention
+          </button>
+          <label className="ml-auto flex items-center gap-2 text-xs text-mut">
+            Sort
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+              className="rounded-md border border-line bg-panel px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+            >
+              <option value="urgency">Urgency</option>
+              <option value="color">Color</option>
+              <option value="type">Type</option>
+              <option value="name">Name</option>
+              <option value="stock">Most stock</option>
+            </select>
+          </label>
+        </div>
+      )}
+
+      {all.length > 0 && visible.length === 0 && (
+        <p className="mt-8 text-center text-sm text-mut">No materials match — clear the search or filters.</p>
+      )}
+
       {all.length === 0 && !materials.isLoading && (
         <Card className="mt-8 text-center">
           <h2 className="text-lg font-semibold">Stock your shop</h2>
@@ -109,18 +194,20 @@ export function DashboardPage() {
         </Card>
       )}
 
-      {/* The wall: gauges grouped by category */}
-      {categories.map((cat) => (
+      {/* The wall: gauges grouped by category, filtered + sorted */}
+      {visibleCategories.map((cat) => (
         <section key={cat} className="mt-8">
           <h2 className="mb-1 flex items-center gap-2 text-[13px] font-bold tracking-widest uppercase text-ink2">
             <MaterialIcon category={cat} size={16} />
             {cat}
             <span className="ml-1 font-mono text-xs font-normal tracking-normal text-mut">
-              {all.filter((m) => m.category === cat).length}
+              {visible.filter((m) => m.category === cat).length}
+              {visible.filter((m) => m.category === cat).length !== all.filter((m) => m.category === cat).length &&
+                ` / ${all.filter((m) => m.category === cat).length}`}
             </span>
           </h2>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-x-2 gap-y-1 rounded-xl border border-line bg-panel p-3 shadow-sm">
-            {all
+            {visible
               .filter((m) => m.category === cat)
               .map((m) => (
                 <MaterialGauge key={m.id} m={m} onClick={() => setDetailId(m.id)} />
