@@ -26,21 +26,17 @@ services:
     volumes:
       - shopkeep-dev-db:/var/lib/postgresql/data
 
-  # OIDC test provider for exercising the D10 login flow.
-  # Runs in the workspace's network namespace so its issuer URL
-  # (http://localhost:5556) is valid for BOTH the in-container server and,
-  # via VS Code port forwarding, the host browser.
-  # NOTE: rebuilding/restarting the workspace container strands dex in the
-  # old network namespace — recreate it afterwards:
-  #   docker compose -p shopkeep_devcontainer --profile oidc up -d --force-recreate dex
+  # OIDC test provider for exercising the D10 login flow. Always on (idle
+  # costs nothing); OIDC stays opt-in via the server's env vars. A socat
+  # bridge in the workspace (postStartCommand) makes http://localhost:5556
+  # valid both in-container (the server) and, via VS Code port forwarding,
+  # in the host browser. Plain service = survives workspace rebuilds; never
+  # run `docker compose up` against this project from the host — it will
+  # recreate the workspace from the base image and strip the dev tooling.
   dex:
     image: ghcr.io/dexidp/dex:latest
-    profiles: ["oidc"]
-    network_mode: "service:workspace"
     volumes:
       - ./dex-config.yaml:/etc/dex/config.docker.yaml:ro
-    depends_on:
-      - workspace
 
 volumes:
   shopkeep-dev-db:
