@@ -4,6 +4,7 @@ import app.shopkeep.auth.OidcService
 import app.shopkeep.auth.PostgresSessionStorage
 import app.shopkeep.auth.UserRepository
 import app.shopkeep.config.AppConfig
+import app.shopkeep.catalog.ProductRepository
 import app.shopkeep.inventory.MaterialRepository
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.DependencyGraph
@@ -25,6 +26,7 @@ interface AppGraph {
     val sessionStorage: PostgresSessionStorage
     val oidcService: OidcService
     val materialRepository: MaterialRepository
+    val productRepository: ProductRepository
 
     @Provides
     @SingleIn(AppScope::class)

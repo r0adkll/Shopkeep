@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { Card, Wordmark } from "../ui";
 import {
@@ -91,7 +91,12 @@ export function DashboardPage() {
     <div className="mx-auto max-w-6xl px-6 pb-16">
       <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
         <Wordmark />
-        <span className="text-xs tracking-widest text-mut uppercase">Inventory</span>
+        <nav className="flex gap-4 text-sm">
+          <span className="font-semibold">Inventory</span>
+          <Link to="/products" className="text-ink2 hover:text-ink">
+            Products
+          </Link>
+        </nav>
         <nav className="ml-auto flex items-center gap-4 text-sm">
           <button
             type="button"
