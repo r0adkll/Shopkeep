@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { Card, Wordmark } from "../ui";
-import { catalogApi, documentUrl, type Product } from "../catalog/api";
+import { catalogApi, type Product } from "../catalog/api";
+import { ProductImage } from "../catalog/ProductImage";
 import { RecipeEditor } from "../catalog/RecipeEditor";
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
@@ -90,13 +91,7 @@ export function ProductsPage() {
                 onClick={() => openProduct.mutate(p.id)}
                 className="flex gap-4 rounded-xl border border-line bg-panel p-5 text-left shadow-sm hover:border-accent"
               >
-                {p.imageDocumentId && (
-                  <img
-                    src={documentUrl(p.imageDocumentId)}
-                    alt=""
-                    className="h-16 w-16 flex-none rounded-lg border border-line object-cover"
-                  />
-                )}
+                <ProductImage imageDocumentId={p.imageDocumentId} size={64} />
                 <div className="min-w-0">
                 <div className="flex items-baseline gap-3">
                   <h2 className="text-[15px] font-semibold">{p.name}</h2>

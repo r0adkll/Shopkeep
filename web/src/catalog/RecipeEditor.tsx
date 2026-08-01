@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { inventoryApi, materialColor, formatQty, type Material } from "../inventory/api";
+import { MaterialIcon } from "../inventory/MaterialIcon";
 import { Button, ErrorText, Field } from "../ui";
 import { catalogApi, documentUrl, enumerate, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
 
@@ -336,7 +337,10 @@ function ImagePicker({
         {imageDocumentId ? (
           <img src={documentUrl(imageDocumentId)} alt="Product" className="h-full w-full object-cover" />
         ) : (
-          <span>{uploading ? "Uploading…" : error ? "⚠ retry" : "+ photo"}</span>
+          <span className="flex flex-col items-center gap-1">
+            <MaterialIcon category="product" size={28} />
+            {uploading ? "Uploading…" : error ? "⚠ retry" : "+ photo"}
+          </span>
         )}
         <input
           type="file"
