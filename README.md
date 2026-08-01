@@ -2,7 +2,7 @@
 
 Self-hosted management suite for crafted-product businesses — material inventory, product recipes, storefront listings, order queue, and fulfillment, with Etsy integration first (Shopify planned). Named for the shopkeeper archetype found throughout game worlds.
 
-> **Status: Phase 0 — foundations.** See the roadmap in the design vault.
+> **Status: Phases 0–1 complete** (foundations; materials & inventory ledger with the dashboard). Next: Phase 2 — products & listings. See the roadmap in the design vault.
 
 ## Design Vault
 

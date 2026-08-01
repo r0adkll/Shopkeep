@@ -49,4 +49,5 @@ Self-hosted suite for managing a crafted-products business (inventory → produc
 - Dev containers are the paved road (`.devcontainer/`), but the repo must stay fully usable without them: plain Gradle + `docker compose up postgres` (D15 — JetBrains support caveat).
 - **Starting the dev loop:** in VS Code the `dev` task auto-runs server + web on folder open (or run it manually via Tasks). Any other terminal: `./scripts/dev.sh`. The scripts bake in dev env vars and auto-enable OIDC when Dex is reachable — never hand-type that env.
 - Config via env vars only; `.env.example` is the canonical list. Never commit real secrets or tokens.
-- Phase 0 exit criteria (vault `Roadmap.md`) define "done" for the current work: compose up → setup wizard → login (local + test OIDC) → empty dashboard; devcontainer opens to a hot-reload loop; backup service produces a restorable dump.
+- Phases 0–1 are complete (vault `Roadmap.md`). Current work: Phase 2 — Products (recipes with fixed/dynamic material slots + dependency rules) and Listings (configuration enumeration, SKU generation). Schema per vault `Data Model.md`; the product recipe builder should get a Design Process concept round before its UI is built.
+- `scripts/seed-dev.sh` seeds a realistic ~50-material inventory for UI work at density (guard: refuses when >15 materials exist; cleanup SQL in its header).
