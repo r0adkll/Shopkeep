@@ -54,14 +54,25 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?set in .env}
     volumes:
       - ${BACKUP_DIR:-./backups}:/backups
-    entrypoint: >
-      bash -c 'while true; do
-        ts=$$(date +%Y%m%d-%H%M%S);
-        pg_dump -h db -U ${POSTGRES_USER:-shopkeep} ${POSTGRES_DB:-shopkeep} | gzip > /backups/shopkeep-$$ts.sql.gz
-          && ls -1t /backups/shopkeep-*.sql.gz | tail -n +15 | xargs -r rm
-          && curl -fsS -m 10 -X POST http://app:8080/api/v1/system/backup-marker || true;
-        sleep 86400;
-      done'
+    entrypoint:
+      - bash
+      - -c
+      # The marker ping uses bash's /dev/tcp because the postgres image
+      # ships no curl/wget; failure to ping never blocks the dump loop.
+      - |
+        while true; do
+          ts=$$(date +%Y%m%d-%H%M%S)
+          if pg_dump -h db -U ${POSTGRES_USER:-shopkeep} ${POSTGRES_DB:-shopkeep} | gzip > "/backups/shopkeep-$$ts.sql.gz"; then
+            echo "backup written: shopkeep-$$ts.sql.gz"
+            ls -1t /backups/shopkeep-*.sql.gz | tail -n +15 | xargs -r rm --
+            (exec 3<>/dev/tcp/app/8080 \
+              && printf 'POST /api/v1/system/backup-marker HTTP/1.1\r\nHost: app\r\nContent-Length: 0\r\nConnection: close\r\n\r\n' >&3 \
+              && cat <&3 >/dev/null) || echo "backup-marker ping failed (non-fatal)"
+          else
+            echo "pg_dump FAILED"
+          fi
+          sleep 86400
+        done
     depends_on:
       db:
         condition: service_healthy
