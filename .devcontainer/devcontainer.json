@@ -37,5 +37,5 @@
     }
   },
   "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends socat && sudo chown vscode:vscode /workspaces/shopkeep/web/node_modules && echo 'Shopkeep devcontainer ready — see CLAUDE.md and the design vault for guidance.'",
-  "postStartCommand": "/bin/sh -c 'pkill socat 2>/dev/null; nohup socat TCP6-LISTEN:5556,fork,reuseaddr,ipv6only=0 TCP:dex:5556 >/tmp/socat-dex.log 2>&1 & exit 0'"
+  "postStartCommand": "/bin/sh -c 'pkill -f \"socat TCP6-LISTEN:5556\" 2>/dev/null; setsid socat TCP6-LISTEN:5556,fork,reuseaddr,ipv6only=0 TCP:dex:5556 </dev/null >/tmp/socat-dex.log 2>&1 & sleep 1; pgrep -f \"socat TCP6-LISTEN:5556\" >/dev/null && echo dex-bridge-up || echo dex-bridge-FAILED; exit 0'"
 }
