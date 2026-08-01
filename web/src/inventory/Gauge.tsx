@@ -1,4 +1,5 @@
 import { formatQty, gaugeFraction, materialColor, type Material } from "./api";
+import { MaterialIcon } from "./MaterialIcon";
 
 /** Ring gauge per the locked Inventory UX concept: fill tinted the material's
  *  actual color, reserved rendered as a faded tail, center = available qty.
@@ -67,7 +68,10 @@ export function MaterialGauge({ m, onClick }: { m: Material; onClick: () => void
         </text>
       </svg>
       <span className="mt-1.5 text-[13px] leading-tight font-semibold">{m.name}</span>
-      <span className="text-[11.5px] text-mut">{m.type}</span>
+      <span className="flex items-center gap-1 text-[11.5px] text-mut">
+        <MaterialIcon category={m.category} type={m.type} size={12} />
+        {m.type}
+      </span>
       {m.status !== "OK" && (
         <span
           className={`mt-1.5 rounded-full px-2 py-0.5 text-[10.5px] font-bold tracking-wider ${

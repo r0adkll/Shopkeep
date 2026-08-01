@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatCost, formatQty, inventoryApi, materialColor, type TxnKind } from "./api";
+import { MaterialIcon } from "./MaterialIcon";
 import { Button, ErrorText, Field } from "../ui";
 
 /** Detail drawer: ledger history chart (step line straight from the ledger),
@@ -46,7 +47,9 @@ export function MaterialDetailDrawer({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center gap-3">
-          <span className="h-8 w-8 rounded-lg border border-line" style={{ background: color ?? "var(--color-panel2)" }} />
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-panel2">
+            <MaterialIcon category={m.category} type={m.type} size={20} style={{ color: color ?? "var(--color-ink2)" }} />
+          </span>
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold">{m.name}</h2>
             <p className="text-xs text-mut">

@@ -5,6 +5,7 @@ import { ApiError, api } from "../api";
 import { Card, Wordmark } from "../ui";
 import { formatQty, inventoryApi, type Material } from "../inventory/api";
 import { MaterialGauge } from "../inventory/Gauge";
+import { MaterialIcon } from "../inventory/MaterialIcon";
 import { MaterialForm } from "../inventory/MaterialForm";
 import { MaterialDetailDrawer } from "../inventory/MaterialDetail";
 
@@ -111,9 +112,10 @@ export function DashboardPage() {
       {/* The wall: gauges grouped by category */}
       {categories.map((cat) => (
         <section key={cat} className="mt-8">
-          <h2 className="mb-1 flex items-baseline gap-3 text-[13px] font-bold tracking-widest uppercase text-ink2">
+          <h2 className="mb-1 flex items-center gap-2 text-[13px] font-bold tracking-widest uppercase text-ink2">
+            <MaterialIcon category={cat} size={16} />
             {cat}
-            <span className="font-mono text-xs font-normal tracking-normal text-mut">
+            <span className="ml-1 font-mono text-xs font-normal tracking-normal text-mut">
               {all.filter((m) => m.category === cat).length}
             </span>
           </h2>
@@ -138,6 +140,7 @@ export function DashboardPage() {
                   className={`h-2 w-2 rounded-sm ${m.status === "CRITICAL" ? "bg-crit" : "bg-warn"}`}
                   aria-hidden="true"
                 />
+                <MaterialIcon category={m.category} type={m.type} size={14} className="text-mut" />
                 <button type="button" onClick={() => setDetailId(m.id)} className="font-medium hover:underline">
                   {m.name}
                 </button>
