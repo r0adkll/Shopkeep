@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { Card, Wordmark } from "../ui";
-import { catalogApi, type Product } from "../catalog/api";
+import { catalogApi, documentUrl, type Product } from "../catalog/api";
 import { RecipeEditor } from "../catalog/RecipeEditor";
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
@@ -88,8 +88,16 @@ export function ProductsPage() {
                 key={p.id}
                 type="button"
                 onClick={() => openProduct.mutate(p.id)}
-                className="rounded-xl border border-line bg-panel p-5 text-left shadow-sm hover:border-accent"
+                className="flex gap-4 rounded-xl border border-line bg-panel p-5 text-left shadow-sm hover:border-accent"
               >
+                {p.imageDocumentId && (
+                  <img
+                    src={documentUrl(p.imageDocumentId)}
+                    alt=""
+                    className="h-16 w-16 flex-none rounded-lg border border-line object-cover"
+                  />
+                )}
+                <div className="min-w-0">
                 <div className="flex items-baseline gap-3">
                   <h2 className="text-[15px] font-semibold">{p.name}</h2>
                   <span className="font-mono text-xs text-mut">{p.skuPrefix}</span>
@@ -109,6 +117,7 @@ export function ProductsPage() {
                   {p.unresolvedCount > 0 && (
                     <span className="font-bold text-warn">▲ {p.unresolvedCount} unresolved</span>
                   )}
+                </div>
                 </div>
               </button>
             ))}

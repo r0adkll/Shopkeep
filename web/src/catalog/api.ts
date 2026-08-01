@@ -24,6 +24,7 @@ export type ProductInput = {
   description: string;
   skuPrefix: string;
   laborMinutes: number;
+  imageDocumentId: number | null;
   slots: Slot[];
   rules: Rule[];
 };
@@ -35,6 +36,7 @@ export type ProductSummary = {
   name: string;
   skuPrefix: string;
   laborMinutes: number;
+  imageDocumentId: number | null;
   archived: boolean;
   slotCount: number;
   configurationCount: number;
@@ -71,6 +73,25 @@ export const catalogApi = {
   setLaborRate: (rateMinor: number) =>
     req<{ rateMinor: number }>("/labor-rate", { method: "PUT", body: JSON.stringify({ rateMinor }) }),
 };
+
+export const documentUrl = (id: number) => `/api/v1/documents/${id}`;
+
+export async function uploadImage(file: File, kind = "product-image"): Promise<number> {
+  const res = await fetch(
+    `/api/v1/documents?kind=${encodeURIComponent(kind)}&filename=${encodeURIComponent(file.name)}`,
+    { method: "POST", headers: { "Content-Type": file.type }, body: file },
+  );
+  if (!res.ok) {
+    let message = res.statusText;
+    try {
+      message = ((await res.json()) as { message: string }).message;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, message);
+  }
+  return ((await res.json()) as { id: number }).id;
+}
 
 /* ---------- client-side enumeration mirroring the server (live preview) ---------- */
 

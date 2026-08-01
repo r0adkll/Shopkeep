@@ -2,13 +2,21 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { inventoryApi, materialColor, formatQty, type Material } from "../inventory/api";
 import { Button, ErrorText, Field } from "../ui";
-import { catalogApi, enumerate, type Product, type ProductInput, type Rule, type Slot } from "./api";
+import { catalogApi, documentUrl, enumerate, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
 
 /** The recipe builder, built to the locked concept (vault: Products.md):
  *  slots define the possibility space, sentence rules resolve dependent
  *  slots, gaps are loud, and the config preview is live. */
 
-const EMPTY: ProductInput = { name: "", description: "", skuPrefix: "", laborMinutes: 0, slots: [], rules: [] };
+const EMPTY: ProductInput = {
+  name: "",
+  description: "",
+  skuPrefix: "",
+  laborMinutes: 0,
+  imageDocumentId: null,
+  slots: [],
+  rules: [],
+};
 
 const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
 
@@ -68,14 +76,20 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
       <div>
         {/* product header */}
         <div className="rounded-xl border border-line bg-panel p-5 shadow-sm">
-          <div className="grid gap-4 sm:grid-cols-[1fr_130px_110px]">
-            <Field label="Product name" value={p.name} onChange={(v) => set({ name: v })} autoFocus={!existing} />
-            <Field label="SKU prefix" value={p.skuPrefix} onChange={(v) => set({ skuPrefix: v.toUpperCase() })} />
-            <Field
-              label="Labor (min)"
-              value={String(p.laborMinutes || "")}
-              onChange={(v) => set({ laborMinutes: parseInt(v) || 0 })}
+          <div className="flex gap-4">
+            <ImagePicker
+              imageDocumentId={p.imageDocumentId}
+              onChange={(id) => set({ imageDocumentId: id })}
             />
+            <div className="grid flex-1 gap-4 sm:grid-cols-[1fr_130px_110px]">
+              <Field label="Product name" value={p.name} onChange={(v) => set({ name: v })} autoFocus={!existing} />
+              <Field label="SKU prefix" value={p.skuPrefix} onChange={(v) => set({ skuPrefix: v.toUpperCase() })} />
+              <Field
+                label="Labor (min)"
+                value={String(p.laborMinutes || "")}
+                onChange={(v) => set({ laborMinutes: parseInt(v) || 0 })}
+              />
+            </div>
           </div>
         </div>
 
@@ -284,6 +298,58 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
           Cancel
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- image picker ---------------- */
+
+function ImagePicker({
+  imageDocumentId,
+  onChange,
+}: {
+  imageDocumentId: number | null;
+  onChange: (id: number | null) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      onChange(await uploadImage(file));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <label
+        className="relative flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-xl border border-dashed border-line bg-panel2 text-center text-[10px] leading-tight text-mut hover:border-accent"
+        title={error ?? "Product photo (optional)"}
+      >
+        {imageDocumentId ? (
+          <img src={documentUrl(imageDocumentId)} alt="Product" className="h-full w-full object-cover" />
+        ) : (
+          <span>{uploading ? "Uploading…" : error ? "⚠ retry" : "+ photo"}</span>
+        )}
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => pick(e.target.files?.[0])}
+        />
+      </label>
+      {imageDocumentId && (
+        <button type="button" onClick={() => onChange(null)} className="text-[10px] text-mut hover:text-crit">
+          remove
+        </button>
+      )}
     </div>
   );
 }

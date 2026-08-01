@@ -39,6 +39,7 @@ object ProductsTable : Table("products") {
     val description = text("description")
     val skuPrefix = text("sku_prefix")
     val laborMinutes = integer("labor_minutes")
+    val imageDocumentId = long("image_document_id").nullable()
     val archivedAt = timestampWithTimeZone("archived_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
@@ -104,6 +105,7 @@ data class ProductInput(
     val description: String = "",
     val skuPrefix: String,
     val laborMinutes: Int = 0,
+    val imageDocumentId: Long? = null,
     val slots: List<SlotInput> = emptyList(),
     val rules: List<RuleInput> = emptyList(),
 )
@@ -115,6 +117,7 @@ data class Product(
     val description: String,
     val skuPrefix: String,
     val laborMinutes: Int,
+    val imageDocumentId: Long?,
     val archived: Boolean,
     val slots: List<SlotInput>,
     val rules: List<RuleInput>,
@@ -126,6 +129,7 @@ data class ProductSummary(
     val name: String,
     val skuPrefix: String,
     val laborMinutes: Int,
+    val imageDocumentId: Long?,
     val archived: Boolean,
     val slotCount: Int,
     val configurationCount: Int,
@@ -172,6 +176,7 @@ class ProductRepository(private val materials: MaterialRepository) {
             it[description] = input.description
             it[skuPrefix] = input.skuPrefix.trim().uppercase()
             it[laborMinutes] = input.laborMinutes
+            it[imageDocumentId] = input.imageDocumentId
         } get ProductsTable.id
         writeRecipe(id, input)
         id
@@ -183,6 +188,7 @@ class ProductRepository(private val materials: MaterialRepository) {
             it[description] = input.description
             it[skuPrefix] = input.skuPrefix.trim().uppercase()
             it[laborMinutes] = input.laborMinutes
+            it[imageDocumentId] = input.imageDocumentId
         } > 0
         if (hit) {
             ProductSlotsTable.deleteWhere { productId eq id }
@@ -255,6 +261,7 @@ class ProductRepository(private val materials: MaterialRepository) {
             description = row[ProductsTable.description],
             skuPrefix = row[ProductsTable.skuPrefix],
             laborMinutes = row[ProductsTable.laborMinutes],
+            imageDocumentId = row[ProductsTable.imageDocumentId],
             archived = row[ProductsTable.archivedAt] != null,
             slots = slotRows.map { s ->
                 SlotInput(
@@ -291,6 +298,7 @@ class ProductRepository(private val materials: MaterialRepository) {
                 name = p.name,
                 skuPrefix = p.skuPrefix,
                 laborMinutes = p.laborMinutes,
+                imageDocumentId = p.imageDocumentId,
                 archived = p.archived,
                 slotCount = p.slots.size,
                 configurationCount = configs.count { it.resolved },
