@@ -30,6 +30,9 @@ services:
   # Runs in the workspace's network namespace so its issuer URL
   # (http://localhost:5556) is valid for BOTH the in-container server and,
   # via VS Code port forwarding, the host browser.
+  # NOTE: rebuilding/restarting the workspace container strands dex in the
+  # old network namespace — recreate it afterwards:
+  #   docker compose -p shopkeep_devcontainer --profile oidc up -d --force-recreate dex
   dex:
     image: ghcr.io/dexidp/dex:latest
     profiles: ["oidc"]
