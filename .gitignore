@@ -18,6 +18,7 @@ web/dist/
 *.iml
 .vscode/*
 !.vscode/extensions.json
+!.vscode/tasks.json
 .DS_Store
 
 # Deploy artifacts

@@ -47,5 +47,6 @@ Self-hosted suite for managing a crafted-products business (inventory → produc
 - **Never run `docker compose up` against `.devcontainer/compose.yaml` from the host while a devcontainer is in use.** Compose will "reconcile" the workspace service back to the raw base image — destroying the feature-built container (Java, Node vanish) and forcing a rebuild. The devcontainer lifecycle belongs to VS Code exclusively; auxiliary services (db, dex) are plain compose services VS Code brings up itself.
 
 - Dev containers are the paved road (`.devcontainer/`), but the repo must stay fully usable without them: plain Gradle + `docker compose up postgres` (D15 — JetBrains support caveat).
+- **Starting the dev loop:** in VS Code the `dev` task auto-runs server + web on folder open (or run it manually via Tasks). Any other terminal: `./scripts/dev.sh`. The scripts bake in dev env vars and auto-enable OIDC when Dex is reachable — never hand-type that env.
 - Config via env vars only; `.env.example` is the canonical list. Never commit real secrets or tokens.
 - Phase 0 exit criteria (vault `Roadmap.md`) define "done" for the current work: compose up → setup wizard → login (local + test OIDC) → empty dashboard; devcontainer opens to a hot-reload loop; backup service produces a restorable dump.

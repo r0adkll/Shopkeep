@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev",
+      "dependsOn": ["dev: server", "dev: web"],
+      "dependsOrder": "parallel",
+      "runOptions": { "runOn": "folderOpen" },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: server",
+      "type": "shell",
+      "command": "./scripts/dev-server.sh",
+      "isBackground": true,
+      "presentation": { "panel": "dedicated", "group": "dev", "reveal": "always" },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: web",
+      "type": "shell",
+      "command": "./scripts/dev-web.sh",
+      "isBackground": true,
+      "presentation": { "panel": "dedicated", "group": "dev", "reveal": "always" },
+      "problemMatcher": []
+    }
+  ]
+}
