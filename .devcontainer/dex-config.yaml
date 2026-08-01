@@ -6,7 +6,9 @@ storage:
   type: memory
 
 web:
-  http: 0.0.0.0:5556
+  # IPv6 wildcard = dual-stack on Linux: the JVM resolves "localhost" to ::1
+  # while curl/browsers may use 127.0.0.1 — this accepts both.
+  http: "[::]:5556"
 
 oauth2:
   skipApprovalScreen: true
