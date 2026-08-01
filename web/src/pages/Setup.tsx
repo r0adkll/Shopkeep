@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { api } from "../api";
 import { Button, Card, ErrorText, Field, Wordmark } from "../ui";
@@ -7,13 +7,20 @@ import { Button, Card, ErrorText, Field, Wordmark } from "../ui";
 /** First-run setup wizard (vault: D7) — creates the admin account. */
 export function SetupPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
 
   const setup = useMutation({
     mutationFn: api.setup,
-    onSuccess: () => navigate({ to: "/" }),
+    onSuccess: (user) => {
+      // Update caches before navigating, or the dashboard's stale
+      // needsSetup=true immediately redirects back here.
+      queryClient.setQueryData(["setup"], { needsSetup: false });
+      queryClient.setQueryData(["me"], user);
+      navigate({ to: "/" });
+    },
   });
 
   return (
