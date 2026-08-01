@@ -13,11 +13,12 @@
     },
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
-  "forwardPorts": [8080, 5173, 5432],
+  "forwardPorts": [8080, 5173, 5432, 5556],
   "portsAttributes": {
     "8080": { "label": "Ktor API" },
     "5173": { "label": "Vite dev server" },
-    "5432": { "label": "PostgreSQL" }
+    "5432": { "label": "PostgreSQL" },
+    "5556": { "label": "Dex (OIDC test provider)" }
   },
   "containerEnv": {
     "DATABASE_URL": "jdbc:postgresql://db:5432/shopkeep",
