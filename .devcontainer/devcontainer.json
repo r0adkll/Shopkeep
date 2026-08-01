@@ -35,5 +35,5 @@
       ]
     }
   },
-  "postCreateCommand": "echo 'Shopkeep devcontainer ready — see CLAUDE.md and the design vault for guidance.'"
+  "postCreateCommand": "sudo chown vscode:vscode /workspaces/shopkeep/web/node_modules && echo 'Shopkeep devcontainer ready — see CLAUDE.md and the design vault for guidance.'"
 }
