@@ -6,6 +6,10 @@ services:
     image: mcr.microsoft.com/devcontainers/base:ubuntu-24.04
     volumes:
       - ..:/workspaces/shopkeep:cached
+      # Isolate node_modules from the host checkout: platform-specific native
+      # binaries (rollup, esbuild) differ between macOS and the Linux container,
+      # and a shared directory lets each side clobber the other's install.
+      - web-node-modules:/workspaces/shopkeep/web/node_modules
     command: sleep infinity
     depends_on:
       - db
@@ -34,3 +38,4 @@ services:
 
 volumes:
   shopkeep-dev-db:
+  web-node-modules:
