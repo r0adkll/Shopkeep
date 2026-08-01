@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/*
+ * Shopkeep design tokens — seeded from the locked Inventory UX concept
+ * (vault: Design Process › Design System). Steel neutrals, machinist-blue
+ * accent, CVD-validated status trio. Dark mode follows the OS.
+ */
+@theme {
+  --color-bg: #f6f6f3;
+  --color-panel: #ffffff;
+  --color-panel2: #fafaf8;
+  --color-ink: #23262b;
+  --color-ink2: #5b6169;
+  --color-mut: #8a9098;
+  --color-line: #e3e3de;
+  --color-accent: #3563a8;
+  --color-good: #2e9e5b;
+  --color-warn: #dd9a0a;
+  --color-crit: #c93b3b;
+
+  --font-display: "Futura", "Avenir Next", "Century Gothic", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #17191c;
+    --color-panel: #1f2228;
+    --color-panel2: #24272e;
+    --color-ink: #e8eaed;
+    --color-ink2: #aab0b8;
+    --color-mut: #7c828b;
+    --color-line: #31353c;
+    --color-accent: #7aa4e0;
+    --color-good: #339a5e;
+    --color-warn: #b78708;
+    --color-crit: #c94040;
+  }
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
