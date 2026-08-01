@@ -12,7 +12,16 @@ data class AppConfig(
     val sessionSecret: String,
     val webDistPath: String?,
     val devMode: Boolean,
+    /** External base URL for OAuth redirects; defaults to localhost for dev. */
+    val baseUrl: String,
+    // OIDC is optional and env-configured; unset = feature invisible (vault: D10).
+    val oidcIssuer: String?,
+    val oidcClientId: String?,
+    val oidcClientSecret: String?,
 ) {
+    val oidcEnabled: Boolean
+        get() = oidcIssuer != null && oidcClientId != null && oidcClientSecret != null
+
     companion object {
         fun fromEnv(env: Map<String, String> = System.getenv()): AppConfig {
             val devMode = env["SHOPKEEP_DEV"] == "true"
@@ -27,6 +36,10 @@ data class AppConfig(
                     ?: if (devMode) "dev-only-session-secret" else missing("SESSION_SECRET"),
                 webDistPath = env["WEB_DIST"],
                 devMode = devMode,
+                baseUrl = env["BASE_URL"] ?: "http://localhost:${env["PORT"]?.toIntOrNull() ?: 8080}",
+                oidcIssuer = env["OIDC_ISSUER"]?.takeIf { it.isNotBlank() },
+                oidcClientId = env["OIDC_CLIENT_ID"]?.takeIf { it.isNotBlank() },
+                oidcClientSecret = env["OIDC_CLIENT_SECRET"]?.takeIf { it.isNotBlank() },
             )
         }
 

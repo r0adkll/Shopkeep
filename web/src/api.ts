@@ -40,5 +40,6 @@ export const api = {
     request<User>("/auth/login", { method: "POST", body: JSON.stringify(body) }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   me: () => request<User>("/auth/me"),
+  providers: () => request<{ oidcEnabled: boolean }>("/auth/providers"),
   health: () => request<{ status: string; version: string }>("/health"),
 };

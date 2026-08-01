@@ -1,11 +1,18 @@
 package app.shopkeep
 
+import app.shopkeep.auth.OidcService
 import app.shopkeep.auth.PostgresSessionStorage
 import app.shopkeep.auth.UserRepository
 import app.shopkeep.config.AppConfig
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provides
+import dev.zacsweers.metro.SingleIn
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.json.Json
 
 /**
  * Metro dependency graph (vault: Tech Stack). Modules grow here as phases land:
@@ -15,6 +22,15 @@ import dev.zacsweers.metro.Provides
 interface AppGraph {
     val userRepository: UserRepository
     val sessionStorage: PostgresSessionStorage
+    val oidcService: OidcService
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun provideHttpClient(): HttpClient = HttpClient(CIO) {
+        install(ContentNegotiation) {
+            json(Json { ignoreUnknownKeys = true })
+        }
+    }
 
     @DependencyGraph.Factory
     fun interface Factory {
