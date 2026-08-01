@@ -1,0 +1,36 @@
+# Dev-container topology (vault: Decisions D15) — mirrors production's two-container
+# shape (D4): one workspace, one Postgres sidecar. Optional profiles add the OIDC
+# test provider (D10) and, later, a CUPS print bridge (D13).
+services:
+  workspace:
+    image: mcr.microsoft.com/devcontainers/base:ubuntu-24.04
+    volumes:
+      - ..:/workspaces/shopkeep:cached
+    command: sleep infinity
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: shopkeep
+      POSTGRES_USER: shopkeep
+      POSTGRES_PASSWORD: shopkeep-dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - shopkeep-dev-db:/var/lib/postgresql/data
+
+  # OIDC test provider for exercising the D10 login flow.
+  # Start with: docker compose --profile oidc up
+  dex:
+    image: ghcr.io/dexidp/dex:latest
+    profiles: ["oidc"]
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dex-config.yaml:/etc/dex/config.docker.yaml:ro
+
+volumes:
+  shopkeep-dev-db:

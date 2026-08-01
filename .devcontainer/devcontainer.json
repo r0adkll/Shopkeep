@@ -1,0 +1,39 @@
+{
+  "name": "shopkeep",
+  "dockerComposeFile": "compose.yaml",
+  "service": "workspace",
+  "workspaceFolder": "/workspaces/shopkeep",
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "21",
+      "installGradle": true
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+  "forwardPorts": [8080, 5173, 5432],
+  "portsAttributes": {
+    "8080": { "label": "Ktor API" },
+    "5173": { "label": "Vite dev server" },
+    "5432": { "label": "PostgreSQL" }
+  },
+  "containerEnv": {
+    "DATABASE_URL": "jdbc:postgresql://db:5432/shopkeep",
+    "DATABASE_USER": "shopkeep",
+    "DATABASE_PASSWORD": "shopkeep-dev"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "fwcd.kotlin",
+        "vscjava.vscode-gradle",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss"
+      ]
+    }
+  },
+  "postCreateCommand": "echo 'Shopkeep devcontainer ready — see CLAUDE.md and the design vault for guidance.'"
+}

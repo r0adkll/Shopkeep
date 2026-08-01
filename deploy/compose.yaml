@@ -1,0 +1,70 @@
+# Shopkeep self-hosted deployment — the reference two-container topology
+# (vault: Decisions D4). Copy this file + .env to your host, fill .env, then:
+#
+#   docker compose up -d
+#
+# Optional profiles:
+#   --profile backup   nightly pg_dump with rotation (vault: D12 — strongly recommended)
+#   --profile cups     CUPS bridge for USB printers (vault: D13)
+services:
+  app:
+    image: ghcr.io/r0adkll/shopkeep:latest
+    restart: unless-stopped
+    ports:
+      - "${SHOPKEEP_PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-shopkeep}
+      DATABASE_USER: ${POSTGRES_USER:-shopkeep}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?set in .env}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?set in .env — BACK THIS UP with your database}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-5}
+      ORDER_ARCHIVE_DAYS: ${ORDER_ARCHIVE_DAYS:-30}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-shopkeep}
+      POSTGRES_USER: ${POSTGRES_USER:-shopkeep}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+    volumes:
+      - shopkeep-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shopkeep}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Nightly pg_dump with 14-day rotation. Postgres holds ALL Shopkeep state
+  # (including generated PDFs), so this dump is a complete backup — but the
+  # TOKEN_ENCRYPTION_KEY in your .env must be backed up alongside it, or
+  # storefront connections will need re-authentication after restore.
+  backup:
+    image: postgres:16
+    profiles: ["backup"]
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+    entrypoint: >
+      bash -c 'while true; do
+        ts=$$(date +%Y%m%d-%H%M%S);
+        pg_dump -h db -U ${POSTGRES_USER:-shopkeep} ${POSTGRES_DB:-shopkeep} | gzip > /backups/shopkeep-$$ts.sql.gz
+          && ls -1t /backups/shopkeep-*.sql.gz | tail -n +15 | xargs -r rm
+          && curl -fsS -m 10 -X POST http://app:8080/api/v1/system/backup-marker || true;
+        sleep 86400;
+      done'
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  shopkeep-db:
