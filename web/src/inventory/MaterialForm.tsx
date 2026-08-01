@@ -3,6 +3,50 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { inventoryApi, type Material, type MaterialInput } from "./api";
 import { Button, ErrorText, Field } from "../ui";
 
+/**
+ * Category-aware material form. Filament is a first-class citizen: curated
+ * type dropdown, gram/spool defaults, and prominent color. Other known
+ * categories get type suggestions; anything custom stays free-text.
+ */
+type CategoryProfile = {
+  types: string[];
+  /** Applied on category selection during creation (never on edit). */
+  defaults?: Partial<Pick<MaterialInput, "unit" | "costQuantity" | "fullQuantity">>;
+  colorPrimary?: boolean;
+  typeStrict?: boolean;
+};
+
+const PROFILES: Record<string, CategoryProfile> = {
+  filament: {
+    types: [
+      "PLA Basic",
+      "PLA Matte",
+      "PLA Silk",
+      "PLA-CF",
+      "PETG",
+      "PETG-CF",
+      "ABS",
+      "ASA",
+      "TPU",
+      "PC",
+      "PA (Nylon)",
+      "PVA (Support)",
+    ],
+    defaults: { unit: "g", costQuantity: 1000, fullQuantity: 1000 },
+    colorPrimary: true,
+    typeStrict: true,
+  },
+  hardware: {
+    types: ["screw", "bolt", "nut", "washer", "magnet", "heat insert", "spring", "adhesive", "bearing"],
+  },
+  packaging: {
+    types: ["box", "mailer", "tape", "label", "insert card", "sticker", "bubble wrap", "void fill"],
+  },
+};
+
+const KNOWN_CATEGORIES = Object.keys(PROFILES);
+const COMMON_UNITS = ["g", "piece", "roll", "bottle", "m", "sheet"];
+
 const EMPTY: MaterialInput = {
   name: "",
   category: "",
@@ -32,15 +76,40 @@ export function MaterialForm({
   const [costDollars, setCostDollars] = useState(existing ? (existing.costMinor / 100).toFixed(2) : "");
   const [initialQty, setInitialQty] = useState("");
   const [color, setColor] = useState(existing?.attributes.color ?? "");
+  const [customType, setCustomType] = useState(
+    !!existing && !!PROFILES[existing.category]?.typeStrict && !PROFILES[existing.category].types.includes(existing.type),
+  );
+
+  const profile: CategoryProfile | undefined = PROFILES[m.category];
+  const allCategories = [...new Set([...KNOWN_CATEGORIES, ...categories])];
 
   const set = (patch: Partial<MaterialInput>) => setM((prev) => ({ ...prev, ...patch }));
+
+  const pickCategory = (cat: string) => {
+    const p = PROFILES[cat];
+    setCustomType(false);
+    if (existing) {
+      set({ category: cat });
+      return;
+    }
+    // Smart defaults on create: only fill fields the user hasn't touched.
+    set({
+      category: cat,
+      type: p?.typeStrict ? "" : m.type,
+      unit: m.unit || p?.defaults?.unit || "",
+      costQuantity: m.costQuantity !== 1 ? m.costQuantity : (p?.defaults?.costQuantity ?? 1),
+      fullQuantity: m.fullQuantity ?? p?.defaults?.fullQuantity ?? null,
+    });
+  };
 
   const save = useMutation({
     mutationFn: async () => {
       const input: MaterialInput = {
         ...m,
         costMinor: Math.round(parseFloat(costDollars || "0") * 100),
-        attributes: color ? { ...m.attributes, color } : Object.fromEntries(Object.entries(m.attributes).filter(([k]) => k !== "color")),
+        attributes: color
+          ? { ...m.attributes, color }
+          : Object.fromEntries(Object.entries(m.attributes).filter(([k]) => k !== "color")),
       };
       return existing
         ? inventoryApi.update(existing.id, input)
@@ -53,90 +122,175 @@ export function MaterialForm({
   });
 
   const num = (v: string) => (v === "" ? null : parseFloat(v) || 0);
+  const isFilament = !!profile?.colorPrimary;
 
   return (
     <div className="fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/40 p-6" onClick={onClose}>
-      <div
-        className="w-full max-w-lg rounded-xl border border-line bg-panel p-6 shadow-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="w-full max-w-lg rounded-xl border border-line bg-panel p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <h2 className="mb-4 text-lg font-semibold">{existing ? `Edit ${existing.name}` : "New material"}</h2>
         <form
-          className="grid grid-cols-2 gap-4"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             save.mutate();
           }}
         >
-          <div className="col-span-2">
-            <Field label="Name" value={m.name} onChange={(v) => set({ name: v })} autoFocus />
-          </div>
+          {/* Category chips first — they shape the rest of the form */}
           <div>
-            <Field label="Category" value={m.category} onChange={(v) => set({ category: v })} />
-            {categories.length > 0 && (
+            <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">Category</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {allCategories.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => pickCategory(c)}
+                  className={`rounded-full border px-3 py-1 text-sm capitalize ${
+                    m.category === c
+                      ? "border-accent bg-accent font-semibold text-white"
+                      : "border-line text-ink2 hover:border-accent"
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+              <input
+                placeholder="other…"
+                value={KNOWN_CATEGORIES.includes(m.category) || categories.includes(m.category) ? "" : m.category}
+                onChange={(e) => set({ category: e.target.value })}
+                className="w-24 rounded-full border border-dashed border-line bg-panel2 px-3 py-1 text-sm outline-none focus:border-accent"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <Field label="Name" value={m.name} onChange={(v) => set({ name: v })} autoFocus />
+            </div>
+
+            {/* Type: dropdown for filament, suggestions for other known categories */}
+            {profile?.typeStrict && !customType ? (
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">Type</span>
+                <select
+                  value={profile.types.includes(m.type) ? m.type : ""}
+                  onChange={(e) => {
+                    if (e.target.value === "__custom__") {
+                      setCustomType(true);
+                      set({ type: "" });
+                    } else {
+                      set({ type: e.target.value });
+                    }
+                  }}
+                  className="w-full rounded-md border border-line bg-panel2 px-3 py-2 text-ink outline-none focus:border-accent"
+                >
+                  <option value="" disabled>
+                    Select…
+                  </option>
+                  {profile.types.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                  <option value="__custom__">Custom…</option>
+                </select>
+              </label>
+            ) : (
+              <div>
+                <Field label="Type" value={m.type} onChange={(v) => set({ type: v })} />
+                {profile && !profile.typeStrict && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {profile.types.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => set({ type: t })}
+                        className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink2 hover:border-accent"
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {customType && (
+                  <button type="button" onClick={() => setCustomType(false)} className="mt-1 text-[11px] text-accent hover:underline">
+                    ← back to filament types
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Color: front and center for filament, available elsewhere */}
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">
+                {isFilament ? "Filament color" : "Color (optional)"}
+              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#888888"}
+                  onChange={(e) => setColor(e.target.value)}
+                  className="h-9 w-14 cursor-pointer rounded border border-line bg-panel2"
+                />
+                {isFilament && color && (
+                  <span className="inline-block h-6 w-6 rounded-full border-4 border-line" style={{ borderColor: color }} aria-hidden="true" />
+                )}
+                <button type="button" onClick={() => setColor("")} className="text-xs text-mut hover:text-ink">
+                  {color ? "clear" : "none"}
+                </button>
+              </div>
+              {isFilament && !color && <span className="mt-1 block text-[11px] text-warn">Spool gauges use this color on the wall.</span>}
+            </label>
+
+            <div>
+              <Field label="Unit" value={m.unit} onChange={(v) => set({ unit: v })} />
               <div className="mt-1 flex flex-wrap gap-1">
-                {categories.map((c) => (
+                {COMMON_UNITS.map((u) => (
                   <button
-                    key={c}
+                    key={u}
                     type="button"
-                    onClick={() => set({ category: c })}
-                    className="rounded-full border border-line px-2 py-0.5 text-[11px] text-ink2 hover:border-accent"
+                    onClick={() => set({ unit: u })}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] ${m.unit === u ? "border-accent text-accent" : "border-line text-ink2 hover:border-accent"}`}
                   >
-                    {c}
+                    {u}
                   </button>
                 ))}
               </div>
-            )}
-          </div>
-          <Field label="Type (PLA, screw…)" value={m.type} onChange={(v) => set({ type: v })} />
-          <Field label="Unit (g, piece, roll…)" value={m.unit} onChange={(v) => set({ unit: v })} />
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">Color</span>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#888888"}
-                onChange={(e) => setColor(e.target.value)}
-                className="h-9 w-12 cursor-pointer rounded border border-line bg-panel2"
-              />
-              <button type="button" onClick={() => setColor("")} className="text-xs text-mut hover:text-ink">
-                {color ? "clear" : "none"}
-              </button>
             </div>
-          </label>
-          <Field label="Cost ($)" value={costDollars} onChange={setCostDollars} />
-          <Field
-            label={`…for how many ${m.unit || "units"}`}
-            value={String(m.costQuantity ?? "")}
-            onChange={(v) => set({ costQuantity: parseFloat(v) || 1 })}
-          />
-          <Field
-            label="Low-stock threshold"
-            value={m.lowStockThreshold == null ? "" : String(m.lowStockThreshold)}
-            onChange={(v) => set({ lowStockThreshold: num(v) })}
-          />
-          <Field
-            label="Reorder quantity"
-            value={m.reorderQuantity == null ? "" : String(m.reorderQuantity)}
-            onChange={(v) => set({ reorderQuantity: num(v) })}
-          />
-          <Field
-            label="Full size (gauge ref)"
-            value={m.fullQuantity == null ? "" : String(m.fullQuantity)}
-            onChange={(v) => set({ fullQuantity: num(v) })}
-          />
-          {!existing && <Field label="Starting stock" value={initialQty} onChange={setInitialQty} />}
-          <div className="col-span-2">
-            <Field label="Vendor URL" value={m.vendorUrl ?? ""} onChange={(v) => set({ vendorUrl: v || null })} />
-          </div>
-          <div className="col-span-2 space-y-2">
-            <ErrorText>{save.error?.message}</ErrorText>
-            <div className="flex gap-3">
-              <Button disabled={save.isPending}>{save.isPending ? "Saving…" : existing ? "Save changes" : "Create material"}</Button>
-              <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 text-ink2 hover:text-ink">
-                Cancel
-              </button>
+            <Field
+              label={isFilament ? "Spool size (g)" : "Full size (gauge ref)"}
+              value={m.fullQuantity == null ? "" : String(m.fullQuantity)}
+              onChange={(v) => set({ fullQuantity: num(v) })}
+            />
+            <Field label="Cost ($)" value={costDollars} onChange={setCostDollars} />
+            <Field
+              label={`…for how many ${m.unit || "units"}`}
+              value={String(m.costQuantity ?? "")}
+              onChange={(v) => set({ costQuantity: parseFloat(v) || 1 })}
+            />
+            <Field
+              label="Low-stock threshold"
+              value={m.lowStockThreshold == null ? "" : String(m.lowStockThreshold)}
+              onChange={(v) => set({ lowStockThreshold: num(v) })}
+            />
+            <Field
+              label="Reorder quantity"
+              value={m.reorderQuantity == null ? "" : String(m.reorderQuantity)}
+              onChange={(v) => set({ reorderQuantity: num(v) })}
+            />
+            {!existing && <Field label="Starting stock" value={initialQty} onChange={setInitialQty} />}
+            <div className={existing ? "col-span-2" : ""}>
+              <Field label="Vendor URL" value={m.vendorUrl ?? ""} onChange={(v) => set({ vendorUrl: v || null })} />
             </div>
+          </div>
+
+          <ErrorText>{save.error?.message}</ErrorText>
+          <div className="flex gap-3">
+            <Button disabled={save.isPending || !m.name || !m.category || !m.unit}>
+              {save.isPending ? "Saving…" : existing ? "Save changes" : "Create material"}
+            </Button>
+            <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 text-ink2 hover:text-ink">
+              Cancel
+            </button>
           </div>
         </form>
       </div>
