@@ -54,6 +54,17 @@ export function MaterialDetailDrawer({
             </p>
           </div>
           <div className="ml-auto flex gap-2">
+            {m.vendorUrl && (
+              <a
+                href={m.vendorUrl}
+                target="_blank"
+                rel="noreferrer"
+                title={m.vendorUrl}
+                className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"
+              >
+                Order{m.reorderQuantity != null ? ` ${formatQty(m.reorderQuantity)} ${m.unit}` : ""} ↗
+              </a>
+            )}
             <button type="button" onClick={onEdit} className="rounded-md border border-line px-3 py-1.5 text-sm text-ink2 hover:text-ink">
               Edit
             </button>
