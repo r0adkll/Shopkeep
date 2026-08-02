@@ -46,6 +46,24 @@ object OrdersTable : Table("orders") {
     val flagShort = bool("flag_short")
     val flagAdhoc = bool("flag_adhoc")
     val completedAt = timestampWithTimeZone("completed_at").nullable()
+    val shipName = text("ship_name").nullable()
+    val shipLine1 = text("ship_line1").nullable()
+    val shipLine2 = text("ship_line2").nullable()
+    val shipCity = text("ship_city").nullable()
+    val shipState = text("ship_state").nullable()
+    val shipZip = text("ship_zip").nullable()
+    val shipCountry = text("ship_country").nullable()
+    val paymentMethod = text("payment_method").nullable()
+    val isGift = bool("is_gift")
+    val giftMessage = text("gift_message").nullable()
+    val giftSender = text("gift_sender").nullable()
+    val subtotalMinor = long("subtotal_minor").nullable()
+    val shippingMinor = long("shipping_minor").nullable()
+    val taxMinor = long("tax_minor").nullable()
+    val discountMinor = long("discount_minor").nullable()
+    val feesMinor = long("fees_minor").nullable()
+    val platformPaid = bool("platform_paid")
+    val platformShipped = bool("platform_shipped")
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -69,6 +87,17 @@ object OrderEventsTable : Table("order_events") {
     val fromCategory = text("from_category").nullable()
     val toCategory = text("to_category")
     val userId = long("user_id").nullable()
+    val createdAt = timestampWithTimeZone("created_at").nullable()
+    override val primaryKey = PrimaryKey(id)
+}
+
+object OrderNotesTable : Table("order_notes") {
+    val id = long("id").autoIncrement()
+    val orderId = long("order_id")
+    val userId = long("user_id").nullable()
+    val body = text("body")
+    val documentIds = jsonb<List<Long>>("document_ids", Json.Default)
+    val createdAt = timestampWithTimeZone("created_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -103,6 +132,59 @@ data class OrderView(
     val flagShort: Boolean,
     val flagAdhoc: Boolean,
     val lines: List<OrderLineView>,
+)
+
+@Serializable
+data class OrderMaterialView(
+    val materialId: Long,
+    val name: String,
+    val colorHex: String?,
+    val quantity: Double,
+    val unit: String,
+    val packaging: Boolean,
+    val status: String, // reserved | short | consumed
+    val availableNow: Double? = null,
+)
+
+@Serializable
+data class OrderEventView(val from: String?, val to: String, val author: String?, val at: String?)
+
+@Serializable
+data class OrderNoteView(
+    val id: Long,
+    val author: String,
+    val body: String,
+    val documentIds: List<Long>,
+    val at: String?,
+)
+
+@Serializable
+data class OrderDetail(
+    val order: OrderView,
+    val shipName: String?,
+    val shipLine1: String?,
+    val shipLine2: String?,
+    val shipCity: String?,
+    val shipState: String?,
+    val shipZip: String?,
+    val shipCountry: String?,
+    val paymentMethod: String?,
+    val isGift: Boolean,
+    val giftMessage: String?,
+    val giftSender: String?,
+    val subtotalMinor: Long?,
+    val shippingMinor: Long?,
+    val taxMinor: Long?,
+    val discountMinor: Long?,
+    val feesMinor: Long?,
+    val platformPaid: Boolean,
+    val platformShipped: Boolean,
+    val completedAt: String?,
+    val materialsCostMinor: Long?,
+    val laborMinor: Long?,
+    val materials: List<OrderMaterialView>,
+    val events: List<OrderEventView>,
+    val notes: List<OrderNoteView>,
 )
 
 @Serializable
@@ -148,6 +230,23 @@ class SyncService(
                     it[totalMinor] = receipt.grandtotal.minor
                     it[currency] = receipt.grandtotal.currencyCode
                     it[placedAt] = OffsetDateTime.ofInstant(Instant.ofEpochSecond(receipt.createdTimestamp), ZoneOffset.UTC)
+                    it[shipName] = receipt.name.takeIf { s -> s.isNotBlank() }
+                    it[shipLine1] = receipt.firstLine
+                    it[shipLine2] = receipt.secondLine
+                    it[shipCity] = receipt.city
+                    it[shipState] = receipt.state
+                    it[shipZip] = receipt.zip
+                    it[shipCountry] = receipt.countryIso
+                    it[paymentMethod] = receipt.paymentMethod
+                    it[isGift] = receipt.isGift
+                    it[giftMessage] = receipt.giftMessage
+                    it[giftSender] = receipt.giftSender
+                    it[subtotalMinor] = receipt.subtotal?.minor
+                    it[shippingMinor] = receipt.totalShippingCost?.minor
+                    it[taxMinor] = receipt.totalTaxCost?.minor
+                    it[discountMinor] = receipt.discountAmt?.minor
+                    it[platformPaid] = receipt.isPaid
+                    it[platformShipped] = receipt.isShipped
                 } get OrdersTable.id
                 OrderEventsTable.insert {
                     it[OrderEventsTable.orderId] = oid
@@ -229,6 +328,11 @@ class SyncService(
                     it[fromCategory] = "new"
                     it[toCategory] = laneName
                 }
+            }
+
+            // Real processing fees from the payments API (concept: net profit).
+            connections.fetchPaymentFees(connectionId, receipt.receiptId)?.let { fees ->
+                dbQuery { OrdersTable.update({ OrdersTable.id eq orderId }) { it[feesMinor] = fees } }
             }
         }
         connections.setCursor(connectionId, OffsetDateTime.now())
@@ -316,5 +420,143 @@ class SyncService(
             )
         }
     }
+    }
+
+    /** Everything the order detail panel shows (locked concept, 2026-08-02). */
+    suspend fun orderDetail(orderId: Long): OrderDetail? {
+        val summary = listOrders().firstOrNull { it.id == orderId } ?: return null
+        val o = dbQuery { OrdersTable.selectAll().where { OrdersTable.id eq orderId }.singleOrNull() } ?: return null
+        val completed = o[OrdersTable.completedAt] != null
+        val notePrefix = "Order #${o[OrdersTable.platformOrderId]}"
+
+        // The order's reserved BOM straight from the ledger, priced with material costs.
+        var matsCost = 0.0
+        val mats = dbQuery {
+            app.shopkeep.inventory.InventoryTransactionsTable
+                .join(
+                    app.shopkeep.inventory.MaterialsTable,
+                    org.jetbrains.exposed.sql.JoinType.INNER,
+                    onColumn = app.shopkeep.inventory.InventoryTransactionsTable.materialId,
+                    otherColumn = app.shopkeep.inventory.MaterialsTable.id,
+                )
+                .selectAll()
+                .where { app.shopkeep.inventory.InventoryTransactionsTable.kind eq "reservation" }
+                .andWhere { app.shopkeep.inventory.InventoryTransactionsTable.note like "$notePrefix%" }
+                .map { r ->
+                    val qty = -r[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble()
+                    val costQty = r[app.shopkeep.inventory.MaterialsTable.costQuantity].toDouble()
+                    if (costQty > 0) matsCost += qty * r[app.shopkeep.inventory.MaterialsTable.costMinor] / costQty
+                    Triple(
+                        r[app.shopkeep.inventory.MaterialsTable.id],
+                        OrderMaterialView(
+                            materialId = r[app.shopkeep.inventory.MaterialsTable.id],
+                            name = r[app.shopkeep.inventory.MaterialsTable.name],
+                            colorHex = r[app.shopkeep.inventory.MaterialsTable.attributes]["color"],
+                            quantity = qty,
+                            unit = r[app.shopkeep.inventory.MaterialsTable.unit],
+                            packaging = (r[app.shopkeep.inventory.InventoryTransactionsTable.note] ?: "").endsWith("packaging"),
+                            status = if (completed) "consumed" else "reserved",
+                        ),
+                        qty,
+                    )
+                }
+        }
+        // Collapse duplicate materials (recipe + extras can hit the same spool).
+        val materialRows = mats.groupBy { it.first }.map { (_, rows) ->
+            rows.first().second.copy(quantity = rows.sumOf { it.third })
+        }.map { row ->
+            if (row.status == "reserved") {
+                val avail = materials.get(row.materialId)?.stock?.available
+                if (avail != null && avail < 0) row.copy(status = "short", availableNow = avail) else row
+            } else row
+        }
+
+        // Labor: matched lines' product labor at the global rate (recipe builder math).
+        val rate = products.laborRateMinor()
+        var laborMinutes = 0
+        dbQuery {
+            OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq orderId }.toList()
+        }.forEach { l ->
+            val configId = l[OrderLinesTable.listingConfigurationId] ?: return@forEach
+            val listingId = dbQuery {
+                ListingConfigurationsTable.selectAll().where { ListingConfigurationsTable.id eq configId }
+                    .singleOrNull()?.get(ListingConfigurationsTable.listingId)
+            } ?: return@forEach
+            val productId = listings.get(listingId)?.input?.productId ?: return@forEach
+            val minutes = products.get(productId)?.laborMinutes ?: 0
+            laborMinutes += minutes * l[OrderLinesTable.quantity]
+        }
+        val laborMinor = if (rate > 0) laborMinutes * rate / 60 else 0
+
+        val users = dbQuery {
+            app.shopkeep.auth.UsersTable.selectAll().associate {
+                it[app.shopkeep.auth.UsersTable.id] to it[app.shopkeep.auth.UsersTable.displayName]
+            }
+        }
+        val events = dbQuery {
+            OrderEventsTable.selectAll().where { OrderEventsTable.orderId eq orderId }
+                .orderBy(OrderEventsTable.id).map { e ->
+                    OrderEventView(
+                        from = e[OrderEventsTable.fromCategory],
+                        to = e[OrderEventsTable.toCategory],
+                        author = e[OrderEventsTable.userId]?.let(users::get),
+                        at = e[OrderEventsTable.createdAt]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                    )
+                }
+        }
+        val notes = dbQuery {
+            OrderNotesTable.selectAll().where { OrderNotesTable.orderId eq orderId }
+                .orderBy(OrderNotesTable.id).map { n ->
+                    OrderNoteView(
+                        id = n[OrderNotesTable.id],
+                        author = n[OrderNotesTable.userId]?.let(users::get) ?: "Unknown",
+                        body = n[OrderNotesTable.body],
+                        documentIds = n[OrderNotesTable.documentIds],
+                        at = n[OrderNotesTable.createdAt]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                    )
+                }
+        }
+
+        return OrderDetail(
+            order = summary,
+            shipName = o[OrdersTable.shipName],
+            shipLine1 = o[OrdersTable.shipLine1],
+            shipLine2 = o[OrdersTable.shipLine2],
+            shipCity = o[OrdersTable.shipCity],
+            shipState = o[OrdersTable.shipState],
+            shipZip = o[OrdersTable.shipZip],
+            shipCountry = o[OrdersTable.shipCountry],
+            paymentMethod = o[OrdersTable.paymentMethod],
+            isGift = o[OrdersTable.isGift],
+            giftMessage = o[OrdersTable.giftMessage],
+            giftSender = o[OrdersTable.giftSender],
+            subtotalMinor = o[OrdersTable.subtotalMinor],
+            shippingMinor = o[OrdersTable.shippingMinor],
+            taxMinor = o[OrdersTable.taxMinor],
+            discountMinor = o[OrdersTable.discountMinor],
+            feesMinor = o[OrdersTable.feesMinor],
+            platformPaid = o[OrdersTable.platformPaid],
+            platformShipped = o[OrdersTable.platformShipped],
+            completedAt = o[OrdersTable.completedAt]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            materialsCostMinor = if (materialRows.isEmpty()) null else matsCost.toLong(),
+            laborMinor = if (materialRows.isEmpty()) null else laborMinor,
+            materials = materialRows,
+            events = events,
+            notes = notes,
+        )
+    }
+
+    suspend fun addNote(orderId: Long, userId: Long?, body: String, documentIds: List<Long>): Boolean {
+        val exists = dbQuery { OrdersTable.selectAll().where { OrdersTable.id eq orderId }.any() }
+        if (!exists) return false
+        dbQuery {
+            OrderNotesTable.insert {
+                it[OrderNotesTable.orderId] = orderId
+                it[OrderNotesTable.userId] = userId
+                it[OrderNotesTable.body] = body
+                it[OrderNotesTable.documentIds] = documentIds
+            }
+        }
+        return true
     }
 }

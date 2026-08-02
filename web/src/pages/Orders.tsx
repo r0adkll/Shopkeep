@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
+import { documentUrl, uploadImage } from "../catalog/api";
 import { NavTabs, Wordmark } from "../ui";
 
 /* Queue board per the locked concept (vault: Order Management / Design Process):
@@ -38,6 +39,45 @@ type Order = {
 };
 type LaneRule = { condition: string; value: string | null };
 type Lane = { id: number | null; name: string; role: string | null; rules: LaneRule[] };
+type OrderMaterial = {
+  materialId: number;
+  name: string;
+  colorHex: string | null;
+  quantity: number;
+  unit: string;
+  packaging: boolean;
+  status: "reserved" | "short" | "consumed";
+  availableNow: number | null;
+};
+type OrderEvent = { from: string | null; to: string; author: string | null; at: string | null };
+type OrderNote = { id: number; author: string; body: string; documentIds: number[]; at: string | null };
+type OrderDetail = {
+  order: Order;
+  shipName: string | null;
+  shipLine1: string | null;
+  shipLine2: string | null;
+  shipCity: string | null;
+  shipState: string | null;
+  shipZip: string | null;
+  shipCountry: string | null;
+  paymentMethod: string | null;
+  isGift: boolean;
+  giftMessage: string | null;
+  giftSender: string | null;
+  subtotalMinor: number | null;
+  shippingMinor: number | null;
+  taxMinor: number | null;
+  discountMinor: number | null;
+  feesMinor: number | null;
+  platformPaid: boolean;
+  platformShipped: boolean;
+  completedAt: string | null;
+  materialsCostMinor: number | null;
+  laborMinor: number | null;
+  materials: OrderMaterial[];
+  events: OrderEvent[];
+  notes: OrderNote[];
+};
 
 const RULE_OPTIONS: { condition: string; label: string; needsValue?: "text" | "number" }[] = [
   { condition: "personalized", label: "personalized" },
@@ -109,6 +149,7 @@ export function OrdersPage() {
   const [dragId, setDragId] = useState<number | null>(null);
   const [overLane, setOverLane] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
+  const [openId, setOpenId] = useState<number | null>(null);
 
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
   const isAdmin = me.data.role === "ADMIN";
@@ -204,8 +245,10 @@ export function OrdersPage() {
                     order={o}
                     laneRole={lane.role}
                     dragging={dragId === o.id}
+                    selected={openId === o.id}
                     onDragStart={() => setDragId(o.id)}
                     onDragEnd={() => setDragId(null)}
+                    onOpen={() => setOpenId(o.id)}
                   />
                 ))}
               </div>
@@ -219,6 +262,403 @@ export function OrdersPage() {
           No orders yet — they ingest automatically from connected shops every few minutes.
         </p>
       )}
+
+      {openId != null && (
+        <OrderDetailPanel
+          orderId={openId}
+          lanes={laneList}
+          boardOrder={laneList.flatMap((l) => all.filter((o) => o.laneId === l.id).map((o) => o.id))}
+          onNavigate={setOpenId}
+          onClose={() => setOpenId(null)}
+          onMove={(orderId, laneId) => move.mutate({ orderId, laneId })}
+        />
+      )}
+    </div>
+  );
+}
+
+const SECTION_H = "mb-1.5 text-[10px] font-extrabold tracking-widest text-mut uppercase";
+
+/** Slide-over order detail per the locked concept (2026-08-02, nine rounds). */
+function OrderDetailPanel(props: {
+  orderId: number;
+  lanes: Lane[];
+  boardOrder: number[];
+  onNavigate: (id: number) => void;
+  onClose: () => void;
+  onMove: (orderId: number, laneId: number) => void;
+}) {
+  const { orderId, lanes, boardOrder, onNavigate, onClose, onMove } = props;
+  const qc = useQueryClient();
+  const detail = useQuery({
+    queryKey: ["order", orderId],
+    queryFn: () => jsonFetch<OrderDetail>(`/api/v1/orders/${orderId}`),
+  });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+      if (e.key === "Escape") onClose();
+      const ix = boardOrder.indexOf(orderId);
+      if (e.key === "ArrowLeft" && boardOrder.length > 0)
+        onNavigate(boardOrder[(ix - 1 + boardOrder.length) % boardOrder.length]);
+      if (e.key === "ArrowRight" && boardOrder.length > 0) onNavigate(boardOrder[(ix + 1) % boardOrder.length]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [orderId, boardOrder, onClose, onNavigate]);
+
+  const d = detail.data;
+  const o = d?.order;
+  const step = (delta: number) => {
+    const ix = boardOrder.indexOf(orderId);
+    if (boardOrder.length > 0) onNavigate(boardOrder[(ix + delta + boardOrder.length) % boardOrder.length]);
+  };
+  const fmtWhen = (iso: string | null) => (iso ? age(iso) : "");
+  const revenue = o && d ? o.totalMinor - (d.taxMinor ?? 0) : 0;
+  const net =
+    d?.materialsCostMinor != null
+      ? revenue - (d.feesMinor ?? 0) - d.materialsCostMinor - (d.laborMinor ?? 0)
+      : null;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-30 bg-black/30" onClick={onClose} />
+      <aside className="fixed top-0 right-0 bottom-0 z-40 flex w-[min(480px,94vw)] flex-col border-l border-line bg-panel shadow-2xl">
+        {/* header */}
+        <div className="border-b border-line px-5 pt-4 pb-3">
+          <div className="flex items-center gap-2">
+            <span className="rounded bg-panel2 px-1.5 py-0.5 text-[8.5px] font-extrabold tracking-wider text-ink2">ETSY</span>
+            <span className="min-w-0 truncate text-[16px] font-bold">{o?.buyerName ?? "…"}</span>
+            <span className="ml-auto flex gap-1">
+              <button onClick={() => step(-1)} title="previous (←)" className="h-6 w-6 rounded-md border border-line bg-panel2 text-xs text-ink2 hover:border-accent hover:text-ink">←</button>
+              <button onClick={() => step(1)} title="next (→)" className="h-6 w-6 rounded-md border border-line bg-panel2 text-xs text-ink2 hover:border-accent hover:text-ink">→</button>
+              <button onClick={onClose} title="close (esc)" className="h-6 w-6 rounded-md border border-line bg-panel2 text-xs text-ink2 hover:border-accent hover:text-ink">✕</button>
+            </span>
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-ink2">
+            <span className="font-mono">#{o?.platformOrderId}</span>
+            {o?.placedAt && <span>placed {age(o.placedAt)} ago</span>}
+            <span className="ml-auto flex items-center gap-1.5">
+              <span className="text-[10px] font-extrabold tracking-widest text-mut">LANE</span>
+              <select
+                value={o?.laneId ?? ""}
+                onChange={(e) => {
+                  const laneId = Number(e.target.value);
+                  onMove(orderId, laneId);
+                  setTimeout(() => qc.invalidateQueries({ queryKey: ["order", orderId] }), 300);
+                }}
+                className="rounded-full border border-line bg-panel2 px-2.5 py-0.5 text-[11.5px] font-bold outline-none focus:border-accent"
+              >
+                {lanes.map((l) => (
+                  <option key={l.id} value={l.id ?? ""}>{l.name}</option>
+                ))}
+              </select>
+            </span>
+          </div>
+        </div>
+
+        {/* body */}
+        <div className="flex-1 overflow-y-auto px-5 pb-5">
+          {detail.isLoading && <p className="py-8 text-center text-sm text-mut">Loading…</p>}
+          {d && o && (
+            <>
+              {o.buyerMessage && (
+                <div className="mt-3 rounded-r-lg border-l-[3px] border-accent bg-panel2 px-3 py-2 text-xs text-ink2 italic">
+                  “{o.buyerMessage}”
+                </div>
+              )}
+
+              {(d.shipLine1 || d.shipCity) && (
+                <div className="mt-4">
+                  <div className={SECTION_H}>
+                    Ship to
+                    <button
+                      onClick={() => {
+                        navigator.clipboard?.writeText(
+                          [d.shipName, [d.shipLine1, d.shipLine2].filter(Boolean).join(", "),
+                            `${d.shipCity ?? ""}, ${d.shipState ?? ""} ${d.shipZip ?? ""}`, d.shipCountry]
+                            .filter(Boolean).join("\n"),
+                        );
+                      }}
+                      className="ml-2 rounded-md border border-line bg-panel2 px-2 py-px text-[10px] font-bold text-ink2 normal-case hover:border-accent hover:text-accent"
+                    >
+                      copy
+                    </button>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="text-xs leading-relaxed text-ink2">
+                      <b className="text-ink">{d.shipName}</b>
+                      <br />{d.shipLine1}{d.shipLine2 ? `, ${d.shipLine2}` : ""}
+                      <br />{d.shipCity}, {d.shipState} {d.shipZip}
+                      <br />{d.shipCountry}
+                      {d.paymentMethod && <div className="mt-1 text-[11px] text-mut">{d.paymentMethod}</div>}
+                    </div>
+                    <span className="ml-auto flex flex-none flex-col items-end gap-1">
+                      <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider ${d.platformPaid ? "bg-good/10 text-good" : "bg-panel2 text-ink2"}`}>
+                        {d.platformPaid ? "✓ PAID" : "UNPAID"}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider ${d.platformShipped ? "bg-good/10 text-good" : "bg-panel2 text-ink2"}`}>
+                        {d.platformShipped ? "✓ SHIPPED" : "NOT SHIPPED"}
+                      </span>
+                      {d.isGift && (
+                        <span className="rounded-full border border-dashed border-accent bg-accent/10 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-accent">
+                          🎁 GIFT
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  {d.isGift && d.giftMessage && (
+                    <div className="mt-2 rounded-r-lg border-l-[3px] border-accent bg-panel2 px-3 py-1.5 text-xs text-ink2 italic">
+                      “{d.giftMessage}” {d.giftSender && <span className="text-mut not-italic">— from {d.giftSender}</span>}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-4">
+                <div className={SECTION_H}>Items</div>
+                {o.lines.map((l) => (
+                  <div key={l.id} className="mb-2 rounded-lg border border-line/70 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="flex-none font-mono text-[10.5px] text-mut">{l.quantity}×</span>
+                      <span className="min-w-0 truncate text-sm font-bold">{l.productName ?? l.title}</span>
+                      <span className="ml-auto flex-none font-mono text-xs text-ink2">{money(l.priceMinor * l.quantity)}</span>
+                    </div>
+                    {l.colors.map((c, i) => (
+                      <div key={i} className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink2">
+                        <span className="h-2.5 w-2.5 flex-none rounded-full border border-line" style={{ background: c.hex ?? "var(--color-panel2)" }} />
+                        <span className="min-w-0 truncate">{c.name}</span>
+                      </div>
+                    ))}
+                    {l.variations.length > 0 && (
+                      <div className="mt-1 text-[11px] text-mut">
+                        {l.variations.map((v, i) => (
+                          <span key={i}>{i > 0 && " · "}{v.formatted_name}: <b className="text-ink2">{v.formatted_value}</b></span>
+                        ))}
+                      </div>
+                    )}
+                    {l.personalization.length > 0 && (
+                      <div className="mt-1.5 rounded-lg border border-accent bg-accent/5 px-2.5 py-1.5">
+                        <div className="text-[9px] font-extrabold tracking-widest text-accent uppercase">✎ Personalization</div>
+                        {l.personalization.map((p, i) => (
+                          <div key={i} className="flex items-baseline gap-3 py-0.5 text-xs">
+                            <span className="min-w-0 flex-1 text-ink2">{p.formatted_name}</span>
+                            <span className="font-mono font-bold break-all">{p.formatted_value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-1.5 flex items-center gap-2 border-t border-dotted border-line/60 pt-1 text-[11px]">
+                      {l.matchedSku ? (
+                        <span className="font-mono font-semibold text-good">✓ {l.matchedSku}</span>
+                      ) : (
+                        <span className="font-mono text-mut">raw sku: {l.rawSku ?? "—"}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                <table className="w-full text-xs">
+                  <tbody>
+                    {d.subtotalMinor != null && (
+                      <tr><td className="py-0.5 text-ink2">Subtotal</td><td className="py-0.5 text-right font-mono text-ink2">{money(d.subtotalMinor)}</td></tr>
+                    )}
+                    {d.shippingMinor != null && (
+                      <tr><td className="py-0.5 text-ink2">Shipping</td><td className="py-0.5 text-right font-mono text-ink2">{d.shippingMinor ? money(d.shippingMinor) : "Free"}</td></tr>
+                    )}
+                    {d.taxMinor != null && (
+                      <tr><td className="py-0.5 text-ink2">Tax <span className="text-[10px] text-mut">Etsy remits</span></td><td className="py-0.5 text-right font-mono text-ink2">{money(d.taxMinor)}</td></tr>
+                    )}
+                    {(d.discountMinor ?? 0) > 0 && (
+                      <tr><td className="py-0.5 text-ink2">Discount</td><td className="py-0.5 text-right font-mono text-good">−{money(d.discountMinor!)}</td></tr>
+                    )}
+                    <tr className="border-t border-line/70 font-bold">
+                      <td className="pt-1.5">Buyer paid</td><td className="pt-1.5 text-right font-mono">{money(o.totalMinor)}</td>
+                    </tr>
+                    {d.materialsCostMinor != null ? (
+                      <>
+                        {d.feesMinor != null && (
+                          <tr><td className="border-t border-dashed border-line pt-1.5 text-ink2" title="amount_fees from the Etsy payments API">Etsy fees</td><td className="border-t border-dashed border-line pt-1.5 text-right font-mono text-ink2">−{money(d.feesMinor)}</td></tr>
+                        )}
+                        <tr><td className="py-0.5 text-ink2" title="this order's reserved bill of materials × material costs">Materials</td><td className="py-0.5 text-right font-mono text-ink2">−{money(d.materialsCostMinor)}</td></tr>
+                        <tr><td className="py-0.5 text-ink2" title="per-product labor × global labor rate">Labor</td><td className="py-0.5 text-right font-mono text-ink2">−{money(d.laborMinor ?? 0)}</td></tr>
+                        {net != null && (
+                          <tr className="border-t border-line/70 font-bold text-good">
+                            <td className="pt-1.5">Net profit {revenue > 0 && <span className="text-[10px] font-semibold text-mut">{Math.round((net / revenue) * 100)}% margin</span>}</td>
+                            <td className="pt-1.5 text-right font-mono">{money(net)}</td>
+                          </tr>
+                        )}
+                      </>
+                    ) : (
+                      <tr><td className="border-t border-dashed border-line pt-1.5 text-ink2">Net profit</td><td className="border-t border-dashed border-line pt-1.5 text-right text-[11px] text-mut italic">match the line to compute</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4">
+                <div className={SECTION_H}>Materials <span className="ml-1 font-semibold tracking-normal normal-case">from the reservation ledger</span></div>
+                {d.materials.length === 0 ? (
+                  <p className="text-xs text-warn">Nothing reserved — line unmatched.</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {d.materials.map((m) => (
+                        <tr
+                          key={`${m.materialId}-${m.packaging}`}
+                          onClick={() => { window.location.href = `/?material=${m.materialId}`; }}
+                          title="open in Inventory"
+                          className="group cursor-pointer border-b border-line/50 last:border-0 hover:bg-accent/5"
+                        >
+                          <td className="py-1.5">
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2.5 w-2.5 flex-none rounded-full border border-line" style={{ background: m.colorHex ?? "var(--color-panel2)" }} />
+                              <span className="min-w-0 truncate group-hover:text-accent group-hover:underline">{m.name}</span>
+                              {m.packaging && <span className="rounded bg-panel2 px-1 text-[8.5px] font-extrabold tracking-wider text-mut">PKG</span>}
+                              <span className="text-[10px] text-accent opacity-0 group-hover:opacity-100">↗</span>
+                            </span>
+                          </td>
+                          <td className="py-1.5 pr-3 text-right font-mono whitespace-nowrap text-ink2">{+m.quantity.toFixed(2)} {m.unit}</td>
+                          <td className={`py-1.5 text-right text-[11px] font-semibold whitespace-nowrap ${m.status === "short" ? "text-crit" : m.status === "consumed" ? "font-normal text-mut" : "text-good"}`}>
+                            {m.status === "short" ? `SHORT — ${+(-(m.availableNow ?? 0)).toFixed(2)} ${m.unit} over` : m.status === "consumed" ? "consumed" : "✓ reserved"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <NotesSection orderId={orderId} notes={d.notes} onAdded={() => qc.invalidateQueries({ queryKey: ["order", orderId] })} />
+
+              <div className="mt-4">
+                <div className={SECTION_H}>Activity <span className="ml-1 font-semibold tracking-normal normal-case">every move is an order_event</span></div>
+                <ul>
+                  {d.events.map((e, i) => (
+                    <li key={i} className="flex items-baseline gap-2 py-1 text-xs text-ink2">
+                      <span className={`relative top-px h-1.5 w-1.5 flex-none rounded-full ${e.author ? "bg-good" : "bg-accent"}`} />
+                      <span className="min-w-0">
+                        {e.from ? <>Moved to <b className="text-ink">{e.to}</b></> : <>Arrived in <b className="text-ink">{e.to}</b></>}
+                        {e.author ? <> by <b className="text-ink">{e.author}</b></> : <span className="text-mut"> · auto</span>}
+                      </span>
+                      <span className="ml-auto flex-none font-mono text-[10.5px] text-mut">{fmtWhen(e.at)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* footer */}
+        <div className="flex items-center gap-3 border-t border-line px-5 py-3">
+          <span className="font-mono text-[15px] font-bold">{o ? money(o.totalMinor) : "…"} <span className="text-[10px] font-semibold text-mut">{o?.currency}</span></span>
+          <button
+            disabled
+            title="Phase 5: buy label + print insert slip"
+            className="ml-auto cursor-not-allowed rounded-lg bg-accent/40 px-4 py-1.5 text-sm font-bold text-white"
+          >
+            Ship…
+          </button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+/** Shopkeep-native private notes — text + photos; nothing syncs to Etsy. */
+function NotesSection({ orderId, notes, onAdded }: { orderId: number; notes: OrderNote[]; onAdded: () => void }) {
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const post = async () => {
+    if (!text.trim() && files.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const ids = [];
+      for (const f of files) ids.push(await uploadImage(f, "order-note"));
+      await jsonFetch(`/api/v1/orders/${orderId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: text.trim(), documentIds: ids }),
+      });
+      setText("");
+      setFiles([]);
+      onAdded();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to post note.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4">
+      <div className={SECTION_H}>Notes <span className="ml-1 font-semibold tracking-normal normal-case">private to the shop — never leaves Shopkeep</span></div>
+      {notes.length === 0 && <p className="py-1 text-xs text-mut italic">No notes yet — spool swaps, color checks, anything the next shift should see.</p>}
+      {notes.map((n) => (
+        <div key={n.id} className="flex gap-2 border-b border-line/50 py-2 last:border-0">
+          <span className="mt-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-full bg-accent/15 text-[10px] font-extrabold text-accent">
+            {n.author.slice(0, 1).toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2 text-[11px] text-mut">
+              <b className="text-xs text-ink">{n.author}</b>
+              {n.at && <span>{age(n.at)} ago</span>}
+            </div>
+            {n.body && <div className="mt-0.5 text-xs leading-relaxed text-ink2">{n.body}</div>}
+            {n.documentIds.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {n.documentIds.map((id) => (
+                  <a key={id} href={documentUrl(id)} target="_blank" rel="noreferrer" className="block h-16 w-20 overflow-hidden rounded-lg border border-line">
+                    <img src={documentUrl(id)} alt="note attachment" className="h-full w-full object-cover" />
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+      <div className="mt-2 rounded-lg border border-line bg-panel2 p-2">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Add a private note… (supports photos)"
+          rows={2}
+          className="w-full resize-none bg-transparent text-xs text-ink outline-none"
+        />
+        <div className="mt-1 flex items-center gap-2">
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="hidden"
+            onChange={(e) => setFiles([...files, ...Array.from(e.target.files ?? [])])}
+          />
+          <button
+            onClick={() => fileInput.current?.click()}
+            className={`rounded-md border border-dashed px-2 py-0.5 text-[11px] ${files.length ? "border-accent text-accent" : "border-line text-ink2"}`}
+          >
+            📎 {files.length ? `${files.length} photo${files.length > 1 ? "s" : ""} ✕` : "Attach photo"}
+          </button>
+          {files.length > 0 && (
+            <button onClick={() => setFiles([])} className="text-[11px] text-mut hover:text-crit">clear</button>
+          )}
+          {error && <span className="text-[11px] text-crit">{error}</span>}
+          <button
+            onClick={post}
+            disabled={busy || (!text.trim() && files.length === 0)}
+            className="ml-auto rounded-md bg-accent px-3 py-1 text-xs font-bold text-white disabled:opacity-40"
+          >
+            {busy ? "Posting…" : "Post note"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -227,8 +667,10 @@ function OrderCard(props: {
   order: Order;
   laneRole: string | null;
   dragging: boolean;
+  selected: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
+  onOpen: () => void;
 }) {
   const o = props.order;
   const anyUnmatched = o.lines.some((l) => !l.matchedSku);
@@ -236,18 +678,28 @@ function OrderCard(props: {
   const multi = o.lines.length > 1;
   const orderAge = age(o.placedAt);
   const old = orderAge.endsWith("d");
+  const didDrag = useRef(false);
 
   return (
     <div
       draggable
       onDragStart={(e) => {
+        didDrag.current = true;
         e.dataTransfer.setData("text", String(o.id));
         props.onDragStart();
       }}
-      onDragEnd={props.onDragEnd}
-      className={`mb-2 cursor-grab rounded-[10px] border border-line bg-panel px-3 py-2.5 shadow-sm active:cursor-grabbing ${
-        props.dragging ? "opacity-40" : ""
-      }`}
+      onDragEnd={() => {
+        props.onDragEnd();
+        setTimeout(() => (didDrag.current = false), 0);
+      }}
+      onClick={(e) => {
+        if (didDrag.current) return;
+        if ((e.target as HTMLElement).closest("summary")) return;
+        props.onOpen();
+      }}
+      className={`mb-2 cursor-pointer rounded-[10px] border bg-panel px-3 py-2.5 shadow-sm transition-colors hover:border-accent ${
+        props.selected ? "border-accent ring-1 ring-accent" : "border-line"
+      } ${props.dragging ? "opacity-40" : ""}`}
     >
       <div className="flex items-baseline gap-1.5">
         <span className="min-w-0 truncate text-[13px] font-[650]">{o.buyerName || "Unknown buyer"}</span>

@@ -73,6 +73,10 @@ fun Route.mockEtsyRoutes() {
                     EtsyReceipt(
                         receiptId = 9001, name = "Mox Ruby", messageFromBuyer = "Please ship before the tournament!",
                         grandtotal = EtsyMoney(10497, 100, "USD"), createdTimestamp = 1754083200,
+                        firstLine = "482 Power Nine Ln", secondLine = "Apt 3", city = "Lotus Valley",
+                        state = "WA", zip = "98101", countryIso = "US", paymentMethod = "Etsy Payments",
+                        subtotal = EtsyMoney(10497, 100, "USD"), totalShippingCost = EtsyMoney(0, 100, "USD"),
+                        totalTaxCost = EtsyMoney(971, 100, "USD"), discountAmt = EtsyMoney(1050, 100, "USD"),
                         transactions = listOf(
                             EtsyTransaction(
                                 transactionId = 91001, title = "3D Printed Game Card Case", sku = real1,
@@ -80,6 +84,7 @@ fun Route.mockEtsyRoutes() {
                                 variations = listOf(
                                     EtsyVariation(200, "Case Color", "Charcoal"),
                                     EtsyVariation(PERSONALIZATION_PROP, "Name to engrave", "MOX"),
+                                    EtsyVariation(PERSONALIZATION_PROP, "Font style", "Script"),
                                 ),
                             ),
                             EtsyTransaction(
@@ -92,6 +97,11 @@ fun Route.mockEtsyRoutes() {
                     EtsyReceipt(
                         receiptId = 9002, name = "Legacy Buyer",
                         grandtotal = EtsyMoney(2999, 100, "USD"), createdTimestamp = 1754086800,
+                        firstLine = "11 Dusty Attic Rd", city = "Oldtown", state = "OH", zip = "44012",
+                        countryIso = "US", paymentMethod = "Etsy Payments",
+                        isGift = true, giftMessage = "Happy birthday — for your collection!", giftSender = "An old friend",
+                        subtotal = EtsyMoney(2999, 100, "USD"), totalShippingCost = EtsyMoney(499, 100, "USD"),
+                        totalTaxCost = EtsyMoney(236, 100, "USD"),
                         transactions = listOf(
                             EtsyTransaction(
                                 transactionId = 92001, title = "Old Dice Vault (pre-Shopkeep)", sku = "LEGACY-BLUE",
@@ -102,6 +112,20 @@ fun Route.mockEtsyRoutes() {
                 ),
             ),
         )
+    }
+
+    // Real fees per receipt — 6.5% transaction + 3%+$0.25 processing, roughly.
+    get("/mock-etsy/shops/{id}/receipts/{rid}/payments") {
+        if (!validApiKey(call.request.header("x-api-key"))) {
+            call.respond(HttpStatusCode.Unauthorized, MockError("x-api-key must be keystring:shared_secret"))
+            return@get
+        }
+        val fees = when (call.parameters["rid"]) {
+            "9001" -> 1082L
+            "9002" -> 379L
+            else -> 0L
+        }
+        call.respond(EtsyPayments(1, listOf(EtsyPayment(EtsyMoney(fees, 100, "USD")))))
     }
 
     // Simulates Etsy's grant screen: immediately consents and bounces back.

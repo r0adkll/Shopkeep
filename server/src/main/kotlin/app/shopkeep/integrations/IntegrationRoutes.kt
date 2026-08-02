@@ -5,6 +5,7 @@ import app.shopkeep.auth.SESSION_AUTH
 import app.shopkeep.auth.requireAdmin
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.auth.authenticate
+import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondRedirect
@@ -18,6 +19,9 @@ import kotlinx.serialization.Serializable
 data class StartEtsyRequest(val keystring: String, val sharedSecret: String = "", val label: String = "")
 
 @Serializable
+data class AddNoteRequest(val body: String = "", val documentIds: List<Long> = emptyList())
+
+@Serializable
 data class StartEtsyResponse(val authUrl: String, val redirectUri: String)
 
 fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService, baseUrl: String) {
@@ -26,6 +30,25 @@ fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService
         get("/integrations/connections") { call.respond(connections.list()) }
 
         get("/orders") { call.respond(sync.listOrders()) }
+
+        get("/orders/{id}") {
+            val detail = call.parameters["id"]?.toLongOrNull()?.let { sync.orderDetail(it) }
+            if (detail == null) call.respond(HttpStatusCode.NotFound, ApiError("Order not found."))
+            else call.respond(detail)
+        }
+
+        post("/orders/{id}/notes") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            val req = call.receive<AddNoteRequest>()
+            if (req.body.isBlank() && req.documentIds.isEmpty()) {
+                call.respond(HttpStatusCode.UnprocessableEntity, ApiError("A note needs text or a photo."))
+                return@post
+            }
+            val userId = call.principal<app.shopkeep.auth.UserSession>()?.userId
+            if (id == null || !sync.addNote(id, userId, req.body.trim(), req.documentIds)) {
+                call.respond(HttpStatusCode.NotFound, ApiError("Order not found."))
+            } else call.respond(HttpStatusCode.Created, AddNoteRequest(req.body.trim(), req.documentIds))
+        }
 
         get("/integrations/etsy/callback") {
             val state = call.request.queryParameters["state"]

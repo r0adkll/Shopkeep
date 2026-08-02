@@ -51,7 +51,11 @@ export function DashboardPage() {
   });
 
   const [creating, setCreating] = useState(false);
-  const [detailId, setDetailId] = useState<number | null>(null);
+  // Deep-link from the order detail panel: /?material=<id> opens the drawer.
+  const [detailId, setDetailId] = useState<number | null>(() => {
+    const m = new URLSearchParams(window.location.search).get("material");
+    return m ? Number(m) : null;
+  });
   const [editing, setEditing] = useState<Material | null>(null);
 
   const [query, setQuery] = useState("");

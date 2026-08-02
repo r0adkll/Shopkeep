@@ -84,10 +84,33 @@ data class EtsyReceipt(
     val grandtotal: EtsyMoney = EtsyMoney(),
     @SerialName("created_timestamp") val createdTimestamp: Long = 0,
     val transactions: List<EtsyTransaction> = emptyList(),
+    // Ship-to, status, gift, and money breakdown (order detail concept).
+    @SerialName("first_line") val firstLine: String? = null,
+    @SerialName("second_line") val secondLine: String? = null,
+    val city: String? = null,
+    val state: String? = null,
+    val zip: String? = null,
+    @SerialName("country_iso") val countryIso: String? = null,
+    @SerialName("payment_method") val paymentMethod: String? = null,
+    @SerialName("is_paid") val isPaid: Boolean = true,
+    @SerialName("is_shipped") val isShipped: Boolean = false,
+    @SerialName("is_gift") val isGift: Boolean = false,
+    @SerialName("gift_message") val giftMessage: String? = null,
+    @SerialName("gift_sender") val giftSender: String? = null,
+    val subtotal: EtsyMoney? = null,
+    @SerialName("total_shipping_cost") val totalShippingCost: EtsyMoney? = null,
+    @SerialName("total_tax_cost") val totalTaxCost: EtsyMoney? = null,
+    @SerialName("discount_amt") val discountAmt: EtsyMoney? = null,
 )
 
 @Serializable
 data class EtsyReceipts(val count: Int = 0, val results: List<EtsyReceipt> = emptyList())
+
+@Serializable
+data class EtsyPayment(@SerialName("amount_fees") val amountFees: EtsyMoney = EtsyMoney())
+
+@Serializable
+data class EtsyPayments(val count: Int = 0, val results: List<EtsyPayment> = emptyList())
 
 object OauthPendingTable : Table("oauth_pending") {
     val state = text("state")
@@ -348,6 +371,20 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         val shopId = row[ConnectionsTable.shopId] ?: return null
         val since = sinceEpochSeconds?.let { "&min_last_modified=$it" } ?: ""
         return etsyGet("$apiBase/shops/$shopId/receipts?was_paid=true&limit=100$since", keystring, secret, access)
+    }
+
+    /** Etsy's actual processing fees for a receipt (payments API amount_fees), in minor units. */
+    suspend fun fetchPaymentFees(connectionId: Long, receiptId: Long): Long? {
+        val row = dbQuery { ConnectionsTable.selectAll().where { ConnectionsTable.id eq connectionId }.singleOrNull() }
+            ?: return null
+        val keystring = row[ConnectionsTable.apiKeystring]
+        val secret = row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: ""
+        val access = row[ConnectionsTable.accessTokenEnc]?.let(crypto::decrypt) ?: return null
+        val shopId = row[ConnectionsTable.shopId] ?: return null
+        return runCatching {
+            etsyGet<EtsyPayments>("$apiBase/shops/$shopId/receipts/$receiptId/payments", keystring, secret, access)
+                .results.firstOrNull()?.amountFees?.minor
+        }.getOrNull()
     }
 
     suspend fun connectedIds(): List<Long> = dbQuery {
