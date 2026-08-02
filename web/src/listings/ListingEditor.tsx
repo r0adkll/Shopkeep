@@ -462,40 +462,70 @@ function DangerZone({ listing, onDone }: { listing: Listing; onDone: () => void 
     },
   });
   const neverPublished = listing.syncState === "not_published" && !listing.etsyListingId;
+
+  const confirmBlock = (
+    tone: "accent" | "crit",
+    message: string,
+    confirmLabel: string,
+  ) => (
+    <div className={`rounded-lg border p-3 ${tone === "crit" ? "border-crit bg-crit/5" : "border-accent bg-accent/5"}`}>
+      <p className="text-xs leading-relaxed text-ink2">{message}</p>
+      <ErrorText>{act.error?.message}</ErrorText>
+      <div className="mt-2.5 flex gap-2">
+        <button
+          type="button"
+          disabled={act.isPending}
+          onClick={() => act.mutate()}
+          className={`flex-1 rounded-md px-3 py-2 text-xs font-bold text-white disabled:opacity-50 ${tone === "crit" ? "bg-crit" : "bg-accent"}`}
+        >
+          {act.isPending ? "Working…" : confirmLabel}
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(null)}
+          className="flex-1 rounded-md border border-line px-3 py-2 text-xs font-semibold text-ink2 hover:text-ink"
+        >
+          Keep listing
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="mt-2 rounded-xl border border-dashed border-line p-3">
-      {confirming ? (
-        <div className="text-xs">
-          <p className="text-ink2">
-            {confirming === "delete"
-              ? "Permanently delete this never-published listing? Its SKUs are freed for reuse."
-              : listing.archived
-                ? "Restore this listing to the active list?"
-                : "Archive this listing? It hides from active lists; SKUs stay reserved for order history. Once Etsy is connected, archiving a published listing will ask whether to deactivate or delete it on the platform."}
-          </p>
-          <ErrorText>{act.error?.message}</ErrorText>
-          <div className="mt-2 flex gap-2">
-            <button type="button" disabled={act.isPending} onClick={() => act.mutate()}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold text-white ${confirming === "delete" ? "bg-crit" : "bg-accent"}`}>
-              {confirming === "delete" ? "Delete permanently" : listing.archived ? "Restore" : "Archive"}
-            </button>
-            <button type="button" onClick={() => setConfirming(null)} className="rounded-md border border-line px-3 py-1.5 text-xs text-ink2">
-              Cancel
-            </button>
-          </div>
-        </div>
+    <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
+      {confirming === "archive" ? (
+        confirmBlock(
+          "accent",
+          listing.archived
+            ? "Restore this listing to the active list?"
+            : "Archive this listing? It disappears from active views; its SKUs stay reserved for order history. Once Etsy is connected, archiving a published listing will also ask whether to deactivate or delete it on the platform.",
+          listing.archived ? "Restore listing" : "Archive listing",
+        )
       ) : (
-        <div className="flex flex-wrap gap-3 text-xs">
-          <button type="button" onClick={() => setConfirming("archive")} className="text-ink2 hover:text-ink">
-            {listing.archived ? "Restore listing" : "Archive listing…"}
-          </button>
-          {neverPublished && !listing.archived && (
-            <button type="button" onClick={() => setConfirming("delete")} className="text-crit hover:underline">
-              Delete…
-            </button>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => setConfirming("archive")}
+          className="rounded-md border border-line px-4 py-2 text-sm font-medium text-ink2 hover:border-accent hover:text-ink"
+        >
+          {listing.archived ? "Restore listing" : "Archive listing"}
+        </button>
       )}
+      {neverPublished && !listing.archived &&
+        (confirming === "delete" ? (
+          confirmBlock(
+            "crit",
+            "Permanently delete this listing? It has never been published, so nothing exists on any platform — its SKUs are freed for reuse. This cannot be undone.",
+            "Delete permanently",
+          )
+        ) : (
+          <button
+            type="button"
+            onClick={() => setConfirming("delete")}
+            className="rounded-md border border-crit/40 px-4 py-2 text-sm font-medium text-crit hover:border-crit hover:bg-crit/5"
+          >
+            Delete permanently
+          </button>
+        ))}
     </div>
   );
 }
