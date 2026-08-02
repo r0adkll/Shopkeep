@@ -15,7 +15,7 @@ Shopkeep's full product spec, architecture, data model, decision log, and roadma
 | Vault note | Governs |
 |---|---|
 | `Roadmap.md` | Phase order and exit criteria — build in phase order; don't pull later-phase work forward without asking |
-| `Decisions.md` | D1–D16, all accepted. Binding. New non-obvious technical choices get a new entry there, not silent code |
+| `Decisions.md` | D1–D18, all accepted. Binding. New non-obvious technical choices get a new entry there, not silent code |
 | `Data Model.md` | Schema and lifecycle invariants (inventory ledger semantics, packaging bands, SKU matching) |
 | `Architecture.md` | Two-container shape, module boundaries, `StorefrontAdapter` seam, IPP printing, backup design |
 | `Design Process.md` + `Inventory UX.md` | UI surfaces need a **locked concept** before implementation; locked concepts bind at the information-design level |

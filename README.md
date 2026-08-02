@@ -6,7 +6,7 @@ Self-hosted management suite for crafted-product businesses — material invento
 
 ## Design Vault
 
-All product specs, architecture, the data model, the decision log (D1–D16), and the phased roadmap live in an Obsidian vault (`craft-management-suite`), which is the source of truth for this implementation. Code and vault must not drift: schema follows `Data Model.md`, module boundaries follow `Architecture.md`, and UI surfaces follow their locked concepts per `Design Process.md`.
+All product specs, architecture, the data model, the decision log (D1–D18), and the phased roadmap live in an Obsidian vault (`craft-management-suite`), which is the source of truth for this implementation. Code and vault must not drift: schema follows `Data Model.md`, module boundaries follow `Architecture.md`, and UI surfaces follow their locked concepts per `Design Process.md`.
 
 ## Stack
 
