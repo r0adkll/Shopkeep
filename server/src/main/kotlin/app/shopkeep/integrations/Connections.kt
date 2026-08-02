@@ -272,8 +272,21 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         ConnectionsTable.selectAll().orderBy(ConnectionsTable.id).map { it.toConnection() }
     }
 
+    /** Hard-deletes only when no orders reference the connection; otherwise
+     *  soft-disconnects (tokens wiped, status flipped) so order provenance
+     *  survives — orders are never orphaned (vault: never delete orders). */
     suspend fun delete(id: Long): Boolean = dbQuery {
-        ConnectionsTable.deleteWhere { ConnectionsTable.id eq id } > 0
+        val hasOrders = OrdersTable.selectAll().where { OrdersTable.connectionId eq id }.any()
+        if (hasOrders) {
+            ConnectionsTable.update({ ConnectionsTable.id eq id }) {
+                it[status] = "disconnected"
+                it[accessTokenEnc] = null
+                it[refreshTokenEnc] = null
+                it[tokenExpiresAt] = null
+            } > 0
+        } else {
+            ConnectionsTable.deleteWhere { ConnectionsTable.id eq id } > 0
+        }
     }
 
     /** Live check: refresh token if near expiry, hit users/me, update status. */
