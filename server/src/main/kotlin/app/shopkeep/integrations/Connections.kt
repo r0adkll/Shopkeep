@@ -369,7 +369,10 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         val secret = row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: ""
         val access = row[ConnectionsTable.accessTokenEnc]?.let(crypto::decrypt) ?: return null
         val shopId = row[ConnectionsTable.shopId] ?: return null
-        val since = sinceEpochSeconds?.let { "&min_last_modified=$it" } ?: ""
+        // First sync (no cursor): only OPEN orders — a real shop's history would
+        // otherwise flood the intake lane with already-shipped receipts. After
+        // that the cursor scopes each pull and shipped-state echoes still arrive.
+        val since = sinceEpochSeconds?.let { "&min_last_modified=$it" } ?: "&was_shipped=false"
         return etsyGet("$apiBase/shops/$shopId/receipts?was_paid=true&limit=100$since", keystring, secret, access)
     }
 
