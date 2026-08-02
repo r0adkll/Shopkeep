@@ -19,6 +19,8 @@ type OrderLine = {
   quantity: number;
   priceMinor: number;
   matchedSku: string | null;
+  matchedListing: boolean;
+  needsReview: boolean;
   productName: string | null;
   colors: LineColor[];
   variations: Variation[];
@@ -461,6 +463,8 @@ function OrderDetailPanel(props: {
                     <div className="mt-1.5 flex items-center gap-2 border-t border-dotted border-line/60 pt-1 text-[11px]">
                       {l.matchedSku ? (
                         <span className="font-mono font-semibold text-good">✓ {l.matchedSku}</span>
+                      ) : l.matchedListing ? (
+                        <span className="font-mono font-semibold text-good">✓ via listing{l.needsReview ? " · needs review" : ""}</span>
                       ) : (
                         <span className="font-mono text-mut">raw sku: {l.rawSku ?? "—"}</span>
                       )}
@@ -682,7 +686,8 @@ function OrderCard(props: {
   onOpen: () => void;
 }) {
   const o = props.order;
-  const anyUnmatched = o.lines.some((l) => !l.matchedSku);
+  const anyUnmatched = o.lines.some((l) => !l.matchedSku && !l.matchedListing);
+  const anyReview = o.lines.some((l) => l.needsReview);
   const pers = o.lines.flatMap((l) => l.personalization);
   const multi = o.lines.length > 1;
   const orderAge = age(o.placedAt);
@@ -756,7 +761,7 @@ function OrderCard(props: {
         })}
       </div>
 
-      {(pers.length > 0 || o.flagShort || o.flagAdhoc || anyUnmatched) && (
+      {(pers.length > 0 || o.flagShort || o.flagAdhoc || anyUnmatched || anyReview) && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {pers.map((p, i) => (
             <span
@@ -780,6 +785,11 @@ function OrderCard(props: {
           {anyUnmatched && (
             <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider text-warn">
               UNMATCHED
+            </span>
+          )}
+          {anyReview && (
+            <span className="rounded-full bg-warn/10 px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider text-warn">
+              REVIEW
             </span>
           )}
         </div>

@@ -82,6 +82,10 @@ object OrderLinesTable : Table("order_lines") {
     val variations = jsonb<List<EtsyVariation>>("variations", Json.Default)
     val personalization = jsonb<List<EtsyVariation>>("personalization", Json.Default)
     val listingConfigurationId = long("listing_configuration_id").nullable()
+    val platformListingId = text("platform_listing_id").nullable()
+    val matchedListingId = long("matched_listing_id").nullable()
+    val resolvedSelections = jsonb<List<app.shopkeep.catalog.ConfigSelection>>("resolved_selections", Json.Default).nullable()
+    val needsReview = bool("needs_review")
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -116,6 +120,8 @@ data class OrderLineView(
     val quantity: Int,
     val priceMinor: Long,
     val matchedSku: String?,
+    val matchedListing: Boolean = false,
+    val needsReview: Boolean = false,
     val productName: String?,
     val colors: List<LineColor> = emptyList(),
     val variations: List<EtsyVariation>,
@@ -295,6 +301,8 @@ class SyncService(
                     }
                 }
                 val personalization = txn.variations.filter { it.propertyId == PERSONALIZATION_PROPERTY_ID }
+                // Imported-listing match (D17): Etsy listing id -> mapped materials.
+                val imported = if (configRow == null) resolveImportedLine(txn) else null
                 dbQuery {
                     OrderLinesTable.insert {
                         it[OrderLinesTable.orderId] = orderId
@@ -306,6 +314,10 @@ class SyncService(
                         it[variations] = txn.variations.filter { v -> v.propertyId != PERSONALIZATION_PROPERTY_ID }
                         it[OrderLinesTable.personalization] = personalization
                         it[listingConfigurationId] = configRow?.get(ListingConfigurationsTable.id)
+                        it[platformListingId] = txn.listingId?.toString()
+                        it[matchedListingId] = imported?.listingId
+                        it[resolvedSelections] = imported?.selections
+                        it[needsReview] = imported?.needsReview ?: false
                     }
                 }
                 if (personalization.isNotEmpty()) anyPersonalized = true
@@ -315,6 +327,10 @@ class SyncService(
                     if (reserveLine(orderId, receipt.receiptId, configRow, txn.quantity)) anyShort = true
                     val listingId = configRow[ListingConfigurationsTable.listingId]
                     unitsByListing[listingId] = (unitsByListing[listingId] ?: 0) + txn.quantity
+                } else if (imported != null) {
+                    matched++
+                    if (reserveResolved(imported, txn.quantity, "Order #${receipt.receiptId}")) anyShort = true
+                    unitsByListing[imported.listingId] = (unitsByListing[imported.listingId] ?: 0) + txn.quantity
                 } else { unmatched++; anyUnmatched = true }
             }
 
@@ -415,6 +431,112 @@ class SyncService(
             }
     }
 
+    data class ImportedResolution(
+        val listingId: Long,
+        val productId: Long,
+        val selections: List<app.shopkeep.catalog.ConfigSelection>,
+        val needsReview: Boolean,
+    )
+
+    /** Etsy listing id -> Shopkeep listing (listing_level mode) -> variation
+     *  values -> materials via platform_value. Values with no mapping (review /
+     *  ignore / unknown) leave a gap and flag the line for review. */
+    private suspend fun resolveImportedLine(txn: EtsyTransaction): ImportedResolution? {
+        val etsyId = txn.listingId?.toString() ?: return null
+        val listingRow = dbQuery {
+            ListingsTable.selectAll().where { ListingsTable.etsyListingId eq etsyId }.singleOrNull()
+        } ?: return null
+        val listing = listings.get(listingRow[ListingsTable.id]) ?: return null
+        val product = products.get(listing.input.productId) ?: return null
+        var review = false
+        val selections = mutableListOf<app.shopkeep.catalog.ConfigSelection>()
+        for (axis in listing.input.axes) {
+            val varVal = txn.variations.firstOrNull {
+                it.propertyId != PERSONALIZATION_PROPERTY_ID && it.name.equals(axis.displayName, ignoreCase = true)
+            }?.value
+            val hit = varVal?.let { v -> axis.values.firstOrNull { it.platformValue.equals(v, ignoreCase = true) } }
+            if (hit == null) { review = true; continue }
+            val mat = materials.get(hit.materialId) ?: continue
+            val slot = product.slots.getOrNull(axis.productSlotPosition)
+            selections += app.shopkeep.catalog.ConfigSelection(
+                slotIndex = axis.productSlotPosition,
+                slotName = slot?.name ?: axis.displayName,
+                materialId = mat.id,
+                materialName = mat.name,
+                color = mat.attributes["color"],
+            )
+        }
+        return ImportedResolution(listing.id, listing.input.productId, selections, review)
+    }
+
+    /** Reserve a dynamically-resolved line: chosen slot materials + fixed slots. */
+    private suspend fun reserveResolved(r: ImportedResolution, quantity: Int, note: String): Boolean {
+        val product = products.get(r.productId) ?: return false
+        var short = false
+        suspend fun reserve(materialId: Long, qty: Double) {
+            materials.recordTransaction(materialId, -qty, TxnKind.RESERVATION, note, null)
+            if ((materials.get(materialId)?.stock?.available ?: 0.0) < 0) short = true
+        }
+        r.selections.forEach { sel ->
+            val slotQty = product.slots.getOrNull(sel.slotIndex)?.quantity ?: return@forEach
+            reserve(sel.materialId, slotQty * quantity)
+        }
+        product.slots.forEachIndexed { _, slot ->
+            if (slot.kind == SlotKind.FIXED && slot.fixedMaterialId != null) {
+                reserve(slot.fixedMaterialId!!, slot.quantity * quantity)
+            }
+        }
+        return short
+    }
+
+    /** Activation hook: resolve waiting unmatched lines for this listing. */
+    suspend fun retroMatch(listingId: Long, etsyListingId: String): Int {
+        var count = 0
+        val lines = dbQuery {
+            OrderLinesTable.selectAll()
+                .where { OrderLinesTable.platformListingId eq etsyListingId }
+                .andWhere { OrderLinesTable.matchedListingId.isNull() }
+                .andWhere { OrderLinesTable.listingConfigurationId.isNull() }
+                .toList()
+        }
+        for (l in lines) {
+            val txn = EtsyTransaction(
+                listingId = etsyListingId.toLong(),
+                quantity = l[OrderLinesTable.quantity],
+                variations = l[OrderLinesTable.variations] + l[OrderLinesTable.personalization],
+            )
+            val r = resolveImportedLine(txn) ?: continue
+            val order = dbQuery {
+                OrdersTable.selectAll().where { OrdersTable.id eq l[OrderLinesTable.orderId] }.single()
+            }
+            // Skip dead/completed orders: nothing to reserve anymore.
+            val dead = order[OrdersTable.platformStatus] in setOf("canceled", "fully refunded")
+            val short = if (!dead && order[OrdersTable.completedAt] == null) {
+                reserveResolved(r, l[OrderLinesTable.quantity], "Order #${order[OrdersTable.platformOrderId]}")
+            } else false
+            dbQuery {
+                OrderLinesTable.update({ OrderLinesTable.id eq l[OrderLinesTable.id] }) {
+                    it[matchedListingId] = r.listingId
+                    it[resolvedSelections] = r.selections
+                    it[needsReview] = r.needsReview
+                }
+                val stillUnmatched = OrderLinesTable.selectAll()
+                    .where { OrderLinesTable.orderId eq order[OrdersTable.id] }
+                    .any { row -> row[OrderLinesTable.listingConfigurationId] == null && row[OrderLinesTable.matchedListingId] == null }
+                OrdersTable.update({ OrdersTable.id eq order[OrdersTable.id] }) {
+                    if (short) it[flagShort] = true
+                }
+                OrderEventsTable.insert {
+                    it[OrderEventsTable.orderId] = order[OrdersTable.id]
+                    it[fromCategory] = null
+                    it[toCategory] = if (stillUnmatched) "line matched via imported listing" else "matched via imported listing — materials reserved"
+                }
+            }
+            count++
+        }
+        return count
+    }
+
     /** Reserve the line's full bill of materials: recipe slots + listing extras. */
     private suspend fun reserveLine(
         orderId: Long,
@@ -447,7 +569,8 @@ class SyncService(
     }
 
     suspend fun listOrders(): List<OrderView> {
-        // configId -> (sku, productName, colors)
+        // configId -> (sku, productName, colors); listingId -> productName
+        var listingProductNames = mapOf<Long, String>()
         val configInfo = dbQuery {
             val listingProduct = ListingsTable.selectAll().associate {
                 it[ListingsTable.id] to it[ListingsTable.productId]
@@ -455,6 +578,9 @@ class SyncService(
             val productNames = app.shopkeep.catalog.ProductsTable.selectAll().associate {
                 it[app.shopkeep.catalog.ProductsTable.id] to it[app.shopkeep.catalog.ProductsTable.name]
             }
+            listingProductNames = listingProduct.mapNotNull { (lid, pid) ->
+                productNames[pid]?.let { lid to it }
+            }.toMap()
             ListingConfigurationsTable.selectAll().associate { c ->
                 val pname = listingProduct[c[ListingConfigurationsTable.listingId]]?.let(productNames::get)
                 c[ListingConfigurationsTable.id] to Triple(
@@ -488,8 +614,13 @@ class SyncService(
                         quantity = l[OrderLinesTable.quantity],
                         priceMinor = l[OrderLinesTable.priceMinor],
                         matchedSku = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.first },
-                        productName = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.second },
-                        colors = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.third } ?: emptyList(),
+                        matchedListing = l[OrderLinesTable.matchedListingId] != null,
+                        needsReview = l[OrderLinesTable.needsReview],
+                        productName = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.second }
+                            ?: l[OrderLinesTable.matchedListingId]?.let(listingProductNames::get),
+                        colors = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.third }
+                            ?: l[OrderLinesTable.resolvedSelections]?.map { s -> LineColor(s.color, s.materialName) }
+                            ?: emptyList(),
                         variations = l[OrderLinesTable.variations],
                         personalization = l[OrderLinesTable.personalization],
                     )
@@ -554,11 +685,13 @@ class SyncService(
         dbQuery {
             OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq orderId }.toList()
         }.forEach { l ->
-            val configId = l[OrderLinesTable.listingConfigurationId] ?: return@forEach
-            val listingId = dbQuery {
-                ListingConfigurationsTable.selectAll().where { ListingConfigurationsTable.id eq configId }
-                    .singleOrNull()?.get(ListingConfigurationsTable.listingId)
-            } ?: return@forEach
+            val configId = l[OrderLinesTable.listingConfigurationId]
+            val listingId = configId?.let { c ->
+                dbQuery {
+                    ListingConfigurationsTable.selectAll().where { ListingConfigurationsTable.id eq c }
+                        .singleOrNull()?.get(ListingConfigurationsTable.listingId)
+                }
+            } ?: l[OrderLinesTable.matchedListingId] ?: return@forEach
             val productId = listings.get(listingId)?.input?.productId ?: return@forEach
             val minutes = products.get(productId)?.laborMinutes ?: 0
             laborMinutes += minutes * l[OrderLinesTable.quantity]

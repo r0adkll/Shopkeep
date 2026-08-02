@@ -7,6 +7,7 @@ import app.shopkeep.auth.oidcRoutes
 import app.shopkeep.catalog.catalogRoutes
 import app.shopkeep.documents.documentRoutes
 import app.shopkeep.integrations.integrationRoutes
+import app.shopkeep.integrations.importRoutes
 import app.shopkeep.integrations.laneRoutes
 import app.shopkeep.integrations.mockEtsyRoutes
 import app.shopkeep.listings.listingRoutes
@@ -117,6 +118,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             listingRoutes(graph.listingRepository)
             integrationRoutes(graph.connectionRepository, graph.syncService, config.baseUrl)
             laneRoutes(graph.laneRepository)
+            importRoutes(graph.importRepository, graph.connectionRepository)
             if (config.etsyMock) {
                 this@shopkeepModule.log.warn("ETSY_MOCK enabled — storefront calls go to the in-process test double")
                 mockEtsyRoutes()

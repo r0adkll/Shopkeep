@@ -70,6 +70,9 @@ export function ListingsPage() {
                 className={`rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
                 archived
               </button>
+              <a href="/listings/import" className="rounded-md border border-line px-3.5 py-1.5 text-xs font-semibold text-ink2 hover:border-accent hover:text-accent">
+                ⇩ Import from Etsy…
+              </a>
               <button type="button" onClick={() => setPicking(true)} className="rounded-md bg-accent px-3.5 py-1.5 font-semibold text-white hover:opacity-90">
                 + Listing
               </button>

@@ -87,6 +87,7 @@ object ListingAxisValuesTable : Table("listing_axis_values") {
     val offered = bool("offered")
     val platformSku = text("platform_sku").nullable()
     val priceOverrideMinor = long("price_override_minor").nullable()
+    val platformValue = text("platform_value").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -132,6 +133,7 @@ data class AxisValueInput(
     val offered: Boolean = true,
     val platformSku: String? = null,
     val priceOverrideMinor: Long? = null,
+    val platformValue: String? = null, // Etsy's value string (imported listings)
 )
 
 @Serializable
@@ -328,6 +330,7 @@ class ListingRepository(private val products: ProductRepository) {
                     it[offered] = v.offered
                     it[platformSku] = v.platformSku
                     it[priceOverrideMinor] = v.priceOverrideMinor
+                    it[platformValue] = v.platformValue
                 }
             }
         }
@@ -345,6 +348,9 @@ class ListingRepository(private val products: ProductRepository) {
      *  configurations and keep those whose choice-slot selections are offered
      *  on every axis. */
     private suspend fun generateConfigurations(input: ListingInput): List<Configuration> {
+        // Listing-level SKU mode (imported listings): no per-combo configurations;
+        // orders resolve dynamically via axis platform_value -> material.
+        if (input.skuMode == "listing_level") return emptyList()
         val all = products.configurations(input.productId) ?: emptyList()
         val offeredBySlot = input.axes.associate { axis ->
             axis.productSlotPosition to axis.values.filter { it.offered }.map { it.materialId }.toSet()
@@ -389,6 +395,7 @@ class ListingRepository(private val products: ProductRepository) {
                                 v[ListingAxisValuesTable.offered],
                                 v[ListingAxisValuesTable.platformSku],
                                 v[ListingAxisValuesTable.priceOverrideMinor],
+                                v[ListingAxisValuesTable.platformValue],
                             )
                         },
                 )

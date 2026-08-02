@@ -71,12 +71,48 @@ data class EtsyVariation(
 @Serializable
 data class EtsyTransaction(
     @SerialName("transaction_id") val transactionId: Long = 0,
+    @SerialName("listing_id") val listingId: Long? = null,
     val title: String = "",
     val sku: String? = null,
     val quantity: Int = 1,
     val price: EtsyMoney = EtsyMoney(),
     val variations: List<EtsyVariation> = emptyList(),
 )
+
+/* ---------- shop listings (import picker, D17) ---------- */
+
+@Serializable
+data class EtsyPropertyValue(
+    @SerialName("property_name") val propertyName: String = "",
+    val values: List<String> = emptyList(),
+)
+
+@Serializable
+data class EtsyOffering(val price: EtsyMoney = EtsyMoney())
+
+@Serializable
+data class EtsyInventoryProduct(
+    val sku: String? = null,
+    @SerialName("property_values") val propertyValues: List<EtsyPropertyValue> = emptyList(),
+    val offerings: List<EtsyOffering> = emptyList(),
+)
+
+@Serializable
+data class EtsyInventory(val products: List<EtsyInventoryProduct> = emptyList())
+
+@Serializable
+data class EtsyShopListing(
+    @SerialName("listing_id") val listingId: Long = 0,
+    val title: String = "",
+    val description: String = "",
+    val state: String = "",
+    val quantity: Int = 0,
+    val tags: List<String> = emptyList(),
+    val inventory: EtsyInventory? = null,
+)
+
+@Serializable
+data class EtsyShopListings(val count: Int = 0, val results: List<EtsyShopListing> = emptyList())
 
 @Serializable
 data class EtsyReceipt(
@@ -393,6 +429,25 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         // that the cursor scopes each pull and shipped-state echoes still arrive.
         val since = sinceEpochSeconds?.let { "&min_last_modified=$it" } ?: "&was_shipped=false"
         return etsyGet("$apiBase/shops/$shopId/receipts?was_paid=true&limit=100$since", keystring, secret, access)
+    }
+
+    /** Active + draft listings with inventory, for the import picker (D17). */
+    suspend fun fetchShopListings(connectionId: Long): List<EtsyShopListing>? {
+        val status = verify(connectionId)?.status ?: return null
+        if (status != "connected") return null
+        val row = dbQuery { ConnectionsTable.selectAll().where { ConnectionsTable.id eq connectionId }.single() }
+        val keystring = row[ConnectionsTable.apiKeystring]
+        val secret = row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: ""
+        val access = row[ConnectionsTable.accessTokenEnc]?.let(crypto::decrypt) ?: return null
+        val shopId = row[ConnectionsTable.shopId] ?: return null
+        return listOf("active", "draft").flatMap { state ->
+            runCatching {
+                etsyGet<EtsyShopListings>(
+                    "$apiBase/shops/$shopId/listings?state=$state&limit=100&includes=Inventory",
+                    keystring, secret, access,
+                ).results
+            }.getOrElse { emptyList() }
+        }
     }
 
     /** Etsy's actual processing fees for a receipt (payments API amount_fees), in minor units. */
