@@ -6,6 +6,7 @@ import app.shopkeep.auth.authRoutes
 import app.shopkeep.auth.oidcRoutes
 import app.shopkeep.catalog.catalogRoutes
 import app.shopkeep.documents.documentRoutes
+import app.shopkeep.integrations.integrationRoutes
 import app.shopkeep.listings.listingRoutes
 import app.shopkeep.inventory.inventoryRoutes
 import app.shopkeep.config.AppConfig
@@ -100,6 +101,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             catalogRoutes(graph.productRepository)
             documentRoutes(graph.documentRepository)
             listingRoutes(graph.listingRepository)
+            integrationRoutes(graph.connectionRepository, config.baseUrl)
         }
 
         // Serve the built SPA when present (vault: D4 — one container serves API + web).

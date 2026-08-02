@@ -66,6 +66,7 @@ export function ListingsPage() {
           <Link to="/" className="text-ink2 hover:text-ink">Inventory</Link>
           <Link to="/products" className="text-ink2 hover:text-ink">Products</Link>
           <span className="font-semibold">Listings</span>
+          <Link to="/connections" className="text-ink2 hover:text-ink">Connections</Link>
         </nav>
         <nav className="ml-auto flex items-center gap-4 text-sm">
           {!editing && (

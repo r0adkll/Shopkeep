@@ -14,6 +14,8 @@ data class AppConfig(
     val devMode: Boolean,
     /** External base URL for OAuth redirects; defaults to localhost for dev. */
     val baseUrl: String,
+    /** Encrypts storefront OAuth tokens at rest (vault D12: back this up with the DB). */
+    val tokenEncryptionKey: String,
     // OIDC is optional and env-configured; unset = feature invisible (vault: D10).
     val oidcIssuer: String?,
     val oidcClientId: String?,
@@ -37,6 +39,8 @@ data class AppConfig(
                 webDistPath = env["WEB_DIST"],
                 devMode = devMode,
                 baseUrl = env["BASE_URL"] ?: "http://localhost:${env["PORT"]?.toIntOrNull() ?: 8080}",
+                tokenEncryptionKey = env["TOKEN_ENCRYPTION_KEY"]
+                    ?: if (devMode) "dev-only-token-key" else missing("TOKEN_ENCRYPTION_KEY"),
                 oidcIssuer = env["OIDC_ISSUER"]?.takeIf { it.isNotBlank() },
                 oidcClientId = env["OIDC_CLIENT_ID"]?.takeIf { it.isNotBlank() },
                 oidcClientSecret = env["OIDC_CLIENT_SECRET"]?.takeIf { it.isNotBlank() },
