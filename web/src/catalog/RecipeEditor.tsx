@@ -11,6 +11,7 @@ import {
   type SortKey,
 } from "../inventory/api";
 import { MaterialIcon } from "../inventory/MaterialIcon";
+import { MaterialPicker } from "../inventory/MaterialPicker";
 import { Button, ErrorText, Field } from "../ui";
 import { catalogApi, documentUrl, enumerate, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
 
@@ -489,11 +490,13 @@ function SlotCard({
       </div>
 
       {slot.kind === "FIXED" ? (
-        <FixedMaterialPicker
-          all={all}
-          value={slot.fixedMaterialId != null ? (byId.get(slot.fixedMaterialId) ?? null) : null}
-          onChange={(id) => onChange({ fixedMaterialId: id })}
-        />
+        <div className="mt-2">
+          <MaterialPicker
+            all={all}
+            value={slot.fixedMaterialId != null ? (byId.get(slot.fixedMaterialId) ?? null) : null}
+            onChange={(id) => onChange({ fixedMaterialId: id })}
+          />
+        </div>
       ) : (
         <>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-mut">
@@ -544,71 +547,6 @@ function SlotCard({
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-/* ---------------- fixed-slot material picker ---------------- */
-
-function FixedMaterialPicker({
-  all,
-  value,
-  onChange,
-}: {
-  all: Material[];
-  value: Material | null;
-  onChange: (id: number | null) => void;
-}) {
-  const [q, setQ] = useState("");
-  const [open, setOpen] = useState(value == null);
-
-  if (value && !open) {
-    return (
-      <div className="mt-2 flex items-center gap-2 text-sm text-ink2">
-        <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: materialColor(value) ?? "var(--color-panel2)" }} />
-        {value.name}
-        <span className="font-mono text-[11px] text-mut">
-          {formatQty(value.stock.available)} {value.unit}
-        </span>
-        <button type="button" onClick={() => setOpen(true)} className="text-xs text-accent hover:underline">
-          change
-        </button>
-      </div>
-    );
-  }
-
-  const matches = sortMaterials(all.filter((m) => matchesQuery(m, q)), "name").slice(0, 8);
-  return (
-    <div className="mt-2">
-      <input
-        autoFocus={value != null}
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="Search materials — name, type, category…"
-        className="w-full max-w-sm rounded-md border border-line bg-panel2 px-3 py-1.5 text-sm outline-none placeholder:text-mut focus:border-accent"
-      />
-      <div className="mt-1 flex flex-col items-start gap-0.5">
-        {matches.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => {
-              onChange(m.id);
-              setOpen(false);
-              setQ("");
-            }}
-            className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-ink2 hover:bg-panel2 hover:text-ink"
-          >
-            <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: materialColor(m) ?? "var(--color-panel2)" }} />
-            {m.name}
-            <span className="text-[11px] text-mut">{m.category}</span>
-            <span className="font-mono text-[11px] text-mut">
-              {formatQty(m.stock.available)} {m.unit}
-            </span>
-          </button>
-        ))}
-        {matches.length === 0 && <span className="px-2 py-1 text-xs text-mut">No materials match.</span>}
-      </div>
     </div>
   );
 }

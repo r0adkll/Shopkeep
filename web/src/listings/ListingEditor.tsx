@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatQty, inventoryApi, materialColor, type Material } from "../inventory/api";
+import { MaterialPicker } from "../inventory/MaterialPicker";
 import { catalogApi, skuCodes, type Product, type ServerConfiguration } from "../catalog/api";
 import { ProductImage } from "../catalog/ProductImage";
 import { Button, ErrorText, Field } from "../ui";
@@ -607,15 +608,11 @@ function ExtrasEditor({
     <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
       {extras.map((e, i) => (
         <div key={i} className="mb-2 flex flex-wrap items-center gap-2 text-sm">
-          <select
-            value={e.materialId}
-            onChange={(ev) => onChange(extras.map((x, j) => (j === i ? { ...x, materialId: +ev.target.value } : x)))}
-            className="rounded border border-line bg-panel2 px-2 py-1 text-sm"
-          >
-            {materials.map((m) => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
+          <MaterialPicker
+            all={materials}
+            value={materials.find((m) => m.id === e.materialId) ?? null}
+            onChange={(id) => onChange(extras.map((x, j) => (j === i ? { ...x, materialId: id } : x)))}
+          />
           <input
             value={String(e.quantity || "")}
             onChange={(ev) => onChange(extras.map((x, j) => (j === i ? { ...x, quantity: parseFloat(ev.target.value) || 0 } : x)))}
@@ -634,7 +631,7 @@ function ExtrasEditor({
       ))}
       <button
         type="button"
-        onClick={() => materials.length && onChange([...extras, { materialId: materials[0].id, quantity: 1, basis: "per_order" }])}
+        onClick={() => materials.length && onChange([...extras, { materialId: 0, quantity: 1, basis: "per_order" }])}
         className="w-full rounded-lg border border-dashed border-line py-1.5 text-xs text-accent hover:border-accent"
       >
         + Add extra
