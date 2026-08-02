@@ -180,7 +180,7 @@ export function OrdersPage() {
                   setOverLane(null);
                   if (dragId != null && lane.id != null) move.mutate({ orderId: dragId, laneId: lane.id });
                 }}
-                className={`min-h-[340px] rounded-xl border bg-panel2 p-2 transition-colors ${
+                className={`min-h-[340px] min-w-0 rounded-xl border bg-panel2 p-2 transition-colors ${
                   overLane === lane.id ? "border-accent" : "border-line"
                 }`}
               >
@@ -279,16 +279,16 @@ function OrderCard(props: {
           );
           // Per locked concept: multi-item orders collapse each item by default.
           return multi ? (
-            <details key={l.id} className="group text-xs text-ink2">
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden">
+            <details key={l.id} className="group min-w-0 text-xs text-ink2">
+              <summary className="flex min-w-0 cursor-pointer list-none items-center gap-1.5 [&::-webkit-details-marker]:hidden">
                 <span className="flex-none text-[9px] text-mut transition-transform group-open:rotate-90">▶</span>
                 {head}
               </summary>
-              <div className="pl-0">{rows}</div>
+              <div className="min-w-0 pl-0">{rows}</div>
             </details>
           ) : (
-            <div key={l.id} className="text-xs text-ink2">
-              <div className="flex items-center gap-1.5">{head}</div>
+            <div key={l.id} className="min-w-0 text-xs text-ink2">
+              <div className="flex min-w-0 items-center gap-1.5">{head}</div>
               {rows}
             </div>
           );
