@@ -1,6 +1,15 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { inventoryApi, materialColor, formatQty, parseQty, type Material } from "../inventory/api";
+import {
+  formatQty,
+  inventoryApi,
+  matchesQuery,
+  materialColor,
+  parseQty,
+  sortMaterials,
+  type Material,
+  type SortKey,
+} from "../inventory/api";
 import { MaterialIcon } from "../inventory/MaterialIcon";
 import { Button, ErrorText, Field } from "../ui";
 import { catalogApi, documentUrl, enumerate, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
@@ -440,7 +449,10 @@ function SlotCard({
   onRemove: () => void;
 }) {
   const [catFilter, setCatFilter] = useState<string>("filament");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortKey>("color");
   const categories = [...new Set(all.map((m) => m.category))];
+  const byId = new Map(all.map((m) => [m.id, m]));
   const unit = slot.fixedMaterialId
     ? byId.get(slot.fixedMaterialId)?.unit
     : byId.get(slot.optionMaterialIds[0] ?? -1)?.unit;
@@ -478,51 +490,126 @@ function SlotCard({
       </div>
 
       {slot.kind === "FIXED" ? (
-        <select
-          value={slot.fixedMaterialId ?? ""}
-          onChange={(e) => onChange({ fixedMaterialId: e.target.value ? +e.target.value : null })}
-          className="mt-2 rounded-md border border-line bg-panel2 px-2 py-1.5 text-sm"
-        >
-          <option value="">Select material…</option>
-          {all.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name} ({m.category})
-            </option>
-          ))}
-        </select>
+        <FixedMaterialPicker
+          all={all}
+          value={slot.fixedMaterialId != null ? (byId.get(slot.fixedMaterialId) ?? null) : null}
+          onChange={(id) => onChange({ fixedMaterialId: id })}
+        />
       ) : (
         <>
-          <div className="mt-2 flex items-center gap-2 text-[11px] text-mut">
-            {slot.kind === "CHOICE" ? "Allowed palette" : "Candidate materials"} · category
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-mut">
+            {slot.kind === "CHOICE" ? "Allowed palette" : "Candidate materials"}
             <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="rounded border border-line bg-panel2 px-1.5 py-0.5 text-[11px]">
               {categories.map((c) => (
                 <option key={c}>{c}</option>
               ))}
             </select>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="filter…"
+              className="w-28 rounded border border-line bg-panel2 px-2 py-0.5 text-[11px] outline-none placeholder:text-mut focus:border-accent"
+            />
+            <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="rounded border border-line bg-panel2 px-1.5 py-0.5 text-[11px]" title="Sort">
+              <option value="color">color</option>
+              <option value="name">name</option>
+              <option value="type">type</option>
+              <option value="stock">stock</option>
+            </select>
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {all
-              .filter((m) => m.category === catFilter || slot.optionMaterialIds.includes(m.id))
-              .map((m) => {
-                const on = slot.optionMaterialIds.includes(m.id);
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => toggleOption(m.id)}
-                    className={`flex items-center gap-1.5 rounded-full border py-0.5 pr-2.5 pl-1.5 text-xs ${
-                      on ? "border-accent font-semibold text-ink" : "border-line text-ink2 opacity-60 hover:opacity-100"
-                    }`}
-                  >
-                    <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: materialColor(m) ?? "var(--color-panel2)" }} />
-                    {m.name}
-                    <span className="font-mono text-[10px] text-mut">{formatQty(m.stock.available)}</span>
-                  </button>
-                );
-              })}
+            {sortMaterials(
+              all.filter(
+                (m) =>
+                  slot.optionMaterialIds.includes(m.id) ||
+                  (m.category === catFilter && matchesQuery(m, query)),
+              ),
+              sort,
+            ).map((m) => {
+              const on = slot.optionMaterialIds.includes(m.id);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => toggleOption(m.id)}
+                  className={`flex items-center gap-1.5 rounded-full border py-0.5 pr-2.5 pl-1.5 text-xs ${
+                    on ? "border-accent font-semibold text-ink" : "border-line text-ink2 opacity-60 hover:opacity-100"
+                  }`}
+                >
+                  <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: materialColor(m) ?? "var(--color-panel2)" }} />
+                  {m.name}
+                  <span className="font-mono text-[10px] text-mut">{formatQty(m.stock.available)}</span>
+                </button>
+              );
+            })}
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/* ---------------- fixed-slot material picker ---------------- */
+
+function FixedMaterialPicker({
+  all,
+  value,
+  onChange,
+}: {
+  all: Material[];
+  value: Material | null;
+  onChange: (id: number | null) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(value == null);
+
+  if (value && !open) {
+    return (
+      <div className="mt-2 flex items-center gap-2 text-sm text-ink2">
+        <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: materialColor(value) ?? "var(--color-panel2)" }} />
+        {value.name}
+        <span className="font-mono text-[11px] text-mut">
+          {formatQty(value.stock.available)} {value.unit}
+        </span>
+        <button type="button" onClick={() => setOpen(true)} className="text-xs text-accent hover:underline">
+          change
+        </button>
+      </div>
+    );
+  }
+
+  const matches = sortMaterials(all.filter((m) => matchesQuery(m, q)), "name").slice(0, 8);
+  return (
+    <div className="mt-2">
+      <input
+        autoFocus={value != null}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search materials — name, type, category…"
+        className="w-full max-w-sm rounded-md border border-line bg-panel2 px-3 py-1.5 text-sm outline-none placeholder:text-mut focus:border-accent"
+      />
+      <div className="mt-1 flex flex-col items-start gap-0.5">
+        {matches.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            onClick={() => {
+              onChange(m.id);
+              setOpen(false);
+              setQ("");
+            }}
+            className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-ink2 hover:bg-panel2 hover:text-ink"
+          >
+            <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: materialColor(m) ?? "var(--color-panel2)" }} />
+            {m.name}
+            <span className="text-[11px] text-mut">{m.category}</span>
+            <span className="font-mono text-[11px] text-mut">
+              {formatQty(m.stock.available)} {m.unit}
+            </span>
+          </button>
+        ))}
+        {matches.length === 0 && <span className="px-2 py-1 text-xs text-mut">No materials match.</span>}
+      </div>
     </div>
   );
 }
