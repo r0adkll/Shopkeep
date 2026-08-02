@@ -106,7 +106,7 @@ export type PreviewConfig = {
 
 /** Distinctive-token SKU codes: strip words shared by every option in the
  *  slot, so "PLA Matte Charcoal" codes as CHAR, not PLAM (mirrors server). */
-function skuCodes(p: ProductInput, byId: Map<number, Material>): Map<number, Map<number, string>> {
+export function skuCodes(p: ProductInput, byId: Map<number, Material>): Map<number, Map<number, string>> {
   const codeOf = (t: string[]) => t.join("").replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase() || "X";
   const sharedOf = (lists: string[][]) =>
     lists.length

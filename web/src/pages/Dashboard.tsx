@@ -96,6 +96,9 @@ export function DashboardPage() {
           <Link to="/products" className="text-ink2 hover:text-ink">
             Products
           </Link>
+          <Link to="/listings" className="text-ink2 hover:text-ink">
+            Listings
+          </Link>
         </nav>
         <nav className="ml-auto flex items-center gap-4 text-sm">
           <button
