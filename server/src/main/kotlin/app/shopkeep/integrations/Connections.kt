@@ -135,9 +135,13 @@ private data class EtsyShop(@SerialName("shop_name") val shopName: String? = nul
 class ConnectionRepository(private val config: AppConfig, private val http: HttpClient) {
     private val crypto = TokenCrypto(config.tokenEncryptionKey)
     private val redirectUri get() = "${config.baseUrl}/api/v1/integrations/etsy/callback"
+    // Mock mode: the BROWSER-facing authorize URL goes through baseUrl (Vite in
+    // dev), but the server's own calls (token/api) hit itself directly on
+    // 127.0.0.1 — never through the frontend dev server, and IPv4-explicit.
+    private val selfBase get() = "http://127.0.0.1:${config.port}/api/v1/mock-etsy"
     private val authBase get() = if (config.etsyMock) "${config.baseUrl}/api/v1/mock-etsy/oauth/connect" else config.etsyAuthBase
-    private val tokenBase get() = if (config.etsyMock) "${config.baseUrl}/api/v1/mock-etsy/oauth/token" else config.etsyTokenBase
-    private val apiBase get() = if (config.etsyMock) "${config.baseUrl}/api/v1/mock-etsy" else config.etsyApiBase
+    private val tokenBase get() = if (config.etsyMock) "$selfBase/oauth/token" else config.etsyTokenBase
+    private val apiBase get() = if (config.etsyMock) selfBase else config.etsyApiBase
 
     /* ---------- OAuth handshake ---------- */
 

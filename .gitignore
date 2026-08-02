@@ -23,3 +23,6 @@ web/dist/
 
 # Deploy artifacts
 deploy/backups/
+
+# Kotlin compiler session artifacts
+.kotlin/
