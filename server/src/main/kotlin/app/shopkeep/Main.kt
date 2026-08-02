@@ -63,7 +63,12 @@ private data class ErrorBody(val message: String)
 fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
     install(CallLogging)
     install(ContentNegotiation) {
-        json(Json { ignoreUnknownKeys = true })
+        // encodeDefaults: kotlinx otherwise OMITS fields equal to their Kotlin
+        // defaults (state:"draft" vanished from listing payloads entirely).
+        json(Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        })
     }
     install(StatusPages) {
         exception<Throwable> { call, cause ->
