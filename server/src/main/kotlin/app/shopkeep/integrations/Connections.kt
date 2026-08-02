@@ -162,7 +162,8 @@ val ETSY_CAPABILITIES = PlatformCapabilities(
     maxVariationAxes = 3, skuOnAllAxes = true, listingFeeMinor = 20, renewalFeeMinor = 20,
 )
 
-const val ETSY_SCOPES = "transactions_r transactions_w listings_r listings_w"
+// shops_r: getMe/getShop require it (learned from real Etsy's 403, 2026-08-02).
+const val ETSY_SCOPES = "shops_r transactions_r transactions_w listings_r listings_w"
 
 @Serializable
 data class Connection(
