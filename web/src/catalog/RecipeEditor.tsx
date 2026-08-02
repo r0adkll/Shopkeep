@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { inventoryApi, materialColor, formatQty, type Material } from "../inventory/api";
+import { inventoryApi, materialColor, formatQty, parseQty, type Material } from "../inventory/api";
 import { MaterialIcon } from "../inventory/MaterialIcon";
 import { Button, ErrorText, Field } from "../ui";
 import { catalogApi, documentUrl, enumerate, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
@@ -345,6 +345,30 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
   );
 }
 
+/* ---------------- quantity input ---------------- */
+
+/** String-buffered so decimals type naturally ("0." doesn't collapse) and
+ *  fraction shorthand works: "1/20" commits as 0.05. */
+function QtyInput({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
+  const [raw, setRaw] = useState(value ? formatQty(value) : "");
+  return (
+    <input
+      value={raw}
+      onChange={(e) => {
+        setRaw(e.target.value);
+        const parsed = parseQty(e.target.value);
+        if (parsed != null && parsed >= 0) onCommit(parsed);
+      }}
+      onBlur={() => {
+        const parsed = parseQty(raw);
+        setRaw(parsed != null && parsed > 0 ? formatQty(parsed) : value ? formatQty(value) : "");
+      }}
+      placeholder="0.05 or 1/20"
+      className="w-20 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-sm"
+    />
+  );
+}
+
 /* ---------------- image picker ---------------- */
 
 function ImagePicker({
@@ -445,11 +469,7 @@ function SlotCard({
           {slot.kind === "RULE" ? "DYNAMIC · BY RULE" : slot.kind}
         </span>
         <label className="ml-auto flex items-center gap-1.5 text-xs text-ink2">
-          <input
-            value={String(slot.quantity || "")}
-            onChange={(e) => onChange({ quantity: parseFloat(e.target.value) || 0 })}
-            className="w-16 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-sm"
-          />
+          <QtyInput value={slot.quantity} onCommit={(quantity) => onChange({ quantity })} />
           {unit ?? "unit"} / unit
         </label>
         <button type="button" onClick={onRemove} className="text-xs text-mut opacity-0 transition-opacity group-hover:opacity-100 hover:text-crit">

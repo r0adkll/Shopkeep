@@ -148,7 +148,20 @@ export function matchesQuery(m: Material, q: string): boolean {
 }
 
 export function formatQty(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  // Up to 3 decimals, trailing zeros trimmed: 0.05 stays "0.05", not "0.1".
+  return Number.isInteger(n) ? String(n) : String(parseFloat(n.toFixed(3)));
+}
+
+/** Parses "0.05" and fraction shorthand like "1/20"; null when incomplete/invalid. */
+export function parseQty(raw: string): number | null {
+  const s = raw.trim();
+  const frac = s.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (frac) {
+    const d = parseFloat(frac[2]);
+    return d > 0 ? parseFloat(frac[1]) / d : null;
+  }
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
 }
 
 export function formatCost(m: Material): string {

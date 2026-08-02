@@ -50,7 +50,7 @@ object ProductSlotsTable : Table("product_slots") {
     val position = integer("position")
     val name = text("name")
     val kind = text("kind")
-    val quantity = decimal("quantity", 12, 2)
+    val quantity = decimal("quantity", 12, 3)
     val fixedMaterialId = long("fixed_material_id").nullable()
     val defaultMaterialId = long("default_material_id").nullable()
     override val primaryKey = PrimaryKey(id)

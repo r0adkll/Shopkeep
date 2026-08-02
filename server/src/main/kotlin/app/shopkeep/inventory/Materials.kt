@@ -54,7 +54,7 @@ object MaterialsTable : Table("materials") {
 object InventoryTransactionsTable : Table("inventory_transactions") {
     val id = long("id").autoIncrement()
     val materialId = long("material_id")
-    val delta = decimal("delta", 12, 2)
+    val delta = decimal("delta", 12, 3)
     val kind = text("kind")
     val note = text("note").nullable()
     val createdBy = long("created_by").nullable()
