@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { Card, ErrorText, Field, Wordmark } from "../ui";
+import { Card, ErrorText, Field, Wordmark, NavTabs } from "../ui";
 
 type Capabilities = { maxPhotos: number; maxVariationAxes: number; skuOnAllAxes: boolean };
 type Connection = {
@@ -77,12 +77,7 @@ export function ConnectionsPage() {
     <div className="mx-auto max-w-4xl px-6 pb-16">
       <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
         <Wordmark />
-        <nav className="flex gap-4 text-sm">
-          <Link to="/" className="text-ink2 hover:text-ink">Inventory</Link>
-          <Link to="/products" className="text-ink2 hover:text-ink">Products</Link>
-          <Link to="/listings" className="text-ink2 hover:text-ink">Listings</Link>
-          <span className="font-semibold">Connections</span>
-        </nav>
+        <NavTabs active="Connections" />
         <span className="ml-auto text-sm text-ink2">{me.data.displayName}</span>
       </header>
 

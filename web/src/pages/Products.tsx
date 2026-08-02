@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { Card, Wordmark } from "../ui";
+import { Card, Wordmark, NavTabs } from "../ui";
 import { catalogApi, type Product } from "../catalog/api";
 import { ProductImage } from "../catalog/ProductImage";
 import { RecipeEditor } from "../catalog/RecipeEditor";
@@ -40,18 +40,7 @@ export function ProductsPage() {
     <div className="mx-auto max-w-6xl px-6 pb-16">
       <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
         <Wordmark />
-        <nav className="flex gap-4 text-sm">
-          <Link to="/" className="text-ink2 hover:text-ink">
-            Inventory
-          </Link>
-          <span className="font-semibold">Products</span>
-          <Link to="/listings" className="text-ink2 hover:text-ink">
-            Listings
-          </Link>
-          <Link to="/connections" className="text-ink2 hover:text-ink">
-            Connections
-          </Link>
-        </nav>
+        <NavTabs active="Products" />
         <nav className="ml-auto flex items-center gap-4 text-sm">
           {!editing && (
             <button

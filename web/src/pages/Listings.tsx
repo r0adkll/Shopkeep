@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { Card, Wordmark } from "../ui";
+import { Card, Wordmark, NavTabs } from "../ui";
 import { inventoryApi } from "../inventory/api";
 import { catalogApi, type Product } from "../catalog/api";
 import { listingsApi, type Listing } from "./../listings/api";
@@ -62,12 +62,7 @@ export function ListingsPage() {
     <div className="mx-auto max-w-6xl px-6 pb-16">
       <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
         <Wordmark />
-        <nav className="flex gap-4 text-sm">
-          <Link to="/" className="text-ink2 hover:text-ink">Inventory</Link>
-          <Link to="/products" className="text-ink2 hover:text-ink">Products</Link>
-          <span className="font-semibold">Listings</span>
-          <Link to="/connections" className="text-ink2 hover:text-ink">Connections</Link>
-        </nav>
+        <NavTabs active="Listings" />
         <nav className="ml-auto flex items-center gap-4 text-sm">
           {!editing && (
             <>
