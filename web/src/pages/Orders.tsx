@@ -223,7 +223,12 @@ export function OrdersPage() {
                 onDrop={(e) => {
                   e.preventDefault();
                   setOverLane(null);
-                  if (dragId != null && lane.id != null) move.mutate({ orderId: dragId, laneId: lane.id });
+                  // Clear here, not just in dragend: the optimistic move unmounts
+                  // the dragged card, so its dragend never fires and it would
+                  // stay dimmed in the new lane.
+                  const dropped = dragId;
+                  setDragId(null);
+                  if (dropped != null && lane.id != null) move.mutate({ orderId: dropped, laneId: lane.id });
                 }}
                 className={`min-h-[340px] min-w-0 rounded-xl border bg-panel2 p-2 transition-colors ${
                   overLane === lane.id ? "border-accent" : "border-line"
