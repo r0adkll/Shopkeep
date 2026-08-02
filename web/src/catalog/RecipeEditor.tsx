@@ -70,7 +70,31 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
   const choiceSlots = p.slots.map((s, i) => ({ s, i })).filter(({ s }) => s.kind === "CHOICE");
   const ruleSlots = p.slots.map((s, i) => ({ s, i })).filter(({ s }) => s.kind === "RULE");
   const laborMinor = Math.round(((laborRate.data?.rateMinor ?? 0) * p.laborMinutes) / 60);
-  const matCost = configs.find((c) => c.resolved)?.materialCostMinor ?? 0;
+
+  // Itemized per-slot costs; choice/rule slots show a min–max range when
+  // their palette's materials are priced differently.
+  const costLines = useMemo(() => {
+    const perUnit = (m: Material | undefined) =>
+      m && m.costQuantity > 0 ? (m.costMinor / m.costQuantity) : 0;
+    return p.slots
+      .filter((s) => s.quantity > 0)
+      .map((s) => {
+        const mats =
+          s.kind === "FIXED"
+            ? [s.fixedMaterialId != null ? byId.get(s.fixedMaterialId) : undefined]
+            : s.optionMaterialIds.map((id) => byId.get(id));
+        const costs = mats.filter(Boolean).map((m) => Math.round(s.quantity * perUnit(m)));
+        const unit = mats.find(Boolean)?.unit ?? "";
+        return {
+          label: `${s.name || "Slot"} · ${s.quantity} ${unit}`,
+          min: costs.length ? Math.min(...costs) : 0,
+          max: costs.length ? Math.max(...costs) : 0,
+        };
+      });
+  }, [p.slots, byId]);
+  const matMin = costLines.reduce((a, l) => a + l.min, 0);
+  const matMax = costLines.reduce((a, l) => a + l.max, 0);
+  const range = (min: number, max: number) => (min === max ? money(min) : `${money(min)}–${money(max)}`);
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
@@ -285,10 +309,28 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
         </div>
         <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
           <div className="text-[10.5px] tracking-widest uppercase text-mut">Unit cost</div>
-          <div className="font-mono text-2xl font-semibold">{money(matCost + laborMinor)}</div>
-          <div className="mt-1 text-xs text-ink2">
-            materials {money(matCost)} + labor {money(laborMinor)}
-            <span className="text-mut"> ({p.laborMinutes} min @ {money(laborRate.data?.rateMinor ?? 0)}/hr)</span>
+          <div className="font-mono text-2xl font-semibold">{range(matMin + laborMinor, matMax + laborMinor)}</div>
+          <div className="mt-2 text-xs">
+            {costLines.map((l) => (
+              <div key={l.label} className="flex justify-between gap-2 border-b border-dotted border-line/60 py-1 text-ink2">
+                <span className="truncate">{l.label}</span>
+                <span className="font-mono whitespace-nowrap">{range(l.min, l.max)}</span>
+              </div>
+            ))}
+            <div className="flex justify-between gap-2 border-b border-dotted border-line/60 py-1 text-ink2">
+              <span>Materials</span>
+              <span className="font-mono whitespace-nowrap">{range(matMin, matMax)}</span>
+            </div>
+            <div className="flex justify-between gap-2 border-b border-dotted border-line/60 py-1 text-ink2">
+              <span>
+                Labor · {p.laborMinutes} min <span className="text-mut">@ {money(laborRate.data?.rateMinor ?? 0)}/hr</span>
+              </span>
+              <span className="font-mono whitespace-nowrap">{money(laborMinor)}</span>
+            </div>
+            <div className="flex justify-between gap-2 py-1 font-semibold">
+              <span>Unit total</span>
+              <span className="font-mono whitespace-nowrap">{range(matMin + laborMinor, matMax + laborMinor)}</span>
+            </div>
           </div>
         </div>
         <ErrorText>{save.error?.message}</ErrorText>
