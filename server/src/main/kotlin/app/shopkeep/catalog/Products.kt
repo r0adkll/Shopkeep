@@ -138,7 +138,13 @@ data class ProductSummary(
 )
 
 @Serializable
-data class ConfigSelection(val slotName: String, val materialId: Long, val materialName: String, val color: String?)
+data class ConfigSelection(
+    val slotIndex: Int,
+    val slotName: String,
+    val materialId: Long,
+    val materialName: String,
+    val color: String?,
+)
 
 @Serializable
 data class Configuration(
@@ -335,17 +341,46 @@ class ProductRepository(private val materials: MaterialRepository) {
      */
     private fun skuCodes(p: Product, stock: Map<Long, Material>): Map<Int, Map<Long, String>> =
         p.slots.withIndex().filter { it.value.kind != SlotKind.FIXED }.associate { (idx, slot) ->
-            val names = slot.optionMaterialIds.associateWith { stock[it]?.name ?: "?" }
-            val tokenized = names.mapValues { (_, n) -> n.split(Regex("[^A-Za-z0-9]+")).filter { it.isNotBlank() } }
-            val shared = tokenized.values
-                .map { it.map(String::lowercase).toSet() }
-                .reduceOrNull { a, b -> a intersect b } ?: emptySet()
-            idx to tokenized.mapValues { (_, tokens) ->
-                val distinctive = tokens.filter { it.lowercase() !in shared }
-                (distinctive.ifEmpty { tokens }).joinToString("").filter { it.isLetterOrDigit() }
-                    .take(4).uppercase().ifBlank { "X" }
-            }
+            idx to distinctCodes(slot.optionMaterialIds.associateWith { stock[it]?.name ?: "?" })
         }
+
+    /** Codes must be unique within the slot. Iteratively strip tokens shared by
+     *  colliding groups (handles "PLA Basic Jet Black" vs "PLA Basic Snow White"
+     *  when a mixed palette keeps "Basic" out of the global shared set), with a
+     *  numeric-suffix fallback so duplicates are impossible. */
+    private fun distinctCodes(names: Map<Long, String>): Map<Long, String> {
+        fun codeOf(tokens: List<String>) =
+            tokens.joinToString("").filter { it.isLetterOrDigit() }.take(4).uppercase().ifBlank { "X" }
+
+        var working = names.mapValues { (_, n) -> n.split(Regex("[^A-Za-z0-9]+")).filter { it.isNotBlank() } }
+        repeat(3) {
+            val shared = working.values.map { it.map(String::lowercase).toSet() }
+                .reduceOrNull { a, b -> a intersect b } ?: emptySet()
+            working = working.mapValues { (_, t) -> t.filter { it.lowercase() !in shared }.ifEmpty { t } }
+            val codes = working.mapValues { codeOf(it.value) }
+            val dupGroups = codes.entries.groupBy { it.value }.filterValues { it.size > 1 }
+            if (dupGroups.isEmpty()) return codes
+            val adjusted = working.toMutableMap()
+            for (entries in dupGroups.values) {
+                val ids = entries.map { it.key }
+                val groupShared = ids.map { adjusted.getValue(it).map(String::lowercase).toSet() }
+                    .reduce { a, b -> a intersect b }
+                ids.forEach { id ->
+                    adjusted[id] = adjusted.getValue(id).filter { it.lowercase() !in groupShared }
+                        .ifEmpty { adjusted.getValue(id) }
+                }
+            }
+            working = adjusted
+        }
+        val codes = working.mapValues { codeOf(it.value) }.toMutableMap()
+        val seen = mutableMapOf<String, Int>()
+        for ((id, c) in codes) {
+            val n = seen.getOrDefault(c, 0)
+            if (n > 0) codes[id] = c.take(3) + (n + 1)
+            seen[c] = n + 1
+        }
+        return codes
+    }
 
     private fun buildConfig(
         p: Product,
@@ -376,7 +411,7 @@ class ProductRepository(private val materials: MaterialRepository) {
             val mat = stock[materialId]
             bom += Triple(slot.name, slot.quantity, mat)
             if (slot.kind != SlotKind.FIXED) {
-                selections += ConfigSelection(slot.name, materialId, mat?.name ?: "?", mat?.attributes?.get("color"))
+                selections += ConfigSelection(idx, slot.name, materialId, mat?.name ?: "?", mat?.attributes?.get("color"))
                 skuParts += codes[idx]?.get(materialId) ?: "X"
             }
         }

@@ -107,24 +107,46 @@ export type PreviewConfig = {
 /** Distinctive-token SKU codes: strip words shared by every option in the
  *  slot, so "PLA Matte Charcoal" codes as CHAR, not PLAM (mirrors server). */
 function skuCodes(p: ProductInput, byId: Map<number, Material>): Map<number, Map<number, string>> {
+  const codeOf = (t: string[]) => t.join("").replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase() || "X";
+  const sharedOf = (lists: string[][]) =>
+    lists.length
+      ? lists.map((t) => new Set(t.map((x) => x.toLowerCase()))).reduce((a, b) => new Set([...a].filter((x) => b.has(x))))
+      : new Set<string>();
   const out = new Map<number, Map<number, string>>();
   p.slots.forEach((slot, idx) => {
     if (slot.kind === "FIXED") return;
-    const tokens = new Map(
+    let working = new Map(
       slot.optionMaterialIds.map((id) => [id, (byId.get(id)?.name ?? "?").split(/[^A-Za-z0-9]+/).filter(Boolean)]),
     );
-    const sets = [...tokens.values()].map((t) => new Set(t.map((x) => x.toLowerCase())));
-    const shared = sets.length ? sets.reduce((a, b) => new Set([...a].filter((x) => b.has(x)))) : new Set<string>();
-    out.set(
-      idx,
-      new Map(
-        [...tokens].map(([id, t]) => {
-          const distinctive = t.filter((x) => !shared.has(x.toLowerCase()));
-          const source = (distinctive.length ? distinctive : t).join("");
-          return [id, source.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase() || "X"];
-        }),
-      ),
-    );
+    // Mirror of the server's distinctCodes: strip globally-shared tokens, then
+    // per-collision-group shared tokens, with a numeric-suffix fallback.
+    for (let pass = 0; pass < 3; pass++) {
+      const shared = sharedOf([...working.values()]);
+      working = new Map([...working].map(([id, t]) => [id, t.filter((x) => !shared.has(x.toLowerCase())) .length ? t.filter((x) => !shared.has(x.toLowerCase())) : t]));
+      const codes = new Map([...working].map(([id, t]) => [id, codeOf(t)]));
+      const groups = new Map<string, number[]>();
+      codes.forEach((c, id) => groups.set(c, [...(groups.get(c) ?? []), id]));
+      const dups = [...groups.values()].filter((g) => g.length > 1);
+      if (!dups.length) {
+        out.set(idx, codes);
+        return;
+      }
+      for (const ids of dups) {
+        const groupShared = sharedOf(ids.map((id) => working.get(id)!));
+        ids.forEach((id) => {
+          const t = working.get(id)!.filter((x) => !groupShared.has(x.toLowerCase()));
+          if (t.length) working.set(id, t);
+        });
+      }
+    }
+    const codes = new Map([...working].map(([id, t]) => [id, codeOf(t)]));
+    const seen = new Map<string, number>();
+    codes.forEach((c, id) => {
+      const n = seen.get(c) ?? 0;
+      if (n > 0) codes.set(id, c.slice(0, 3) + (n + 1));
+      seen.set(c, n + 1);
+    });
+    out.set(idx, codes);
   });
   return out;
 }

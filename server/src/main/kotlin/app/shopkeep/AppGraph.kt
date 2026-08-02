@@ -6,6 +6,7 @@ import app.shopkeep.auth.UserRepository
 import app.shopkeep.config.AppConfig
 import app.shopkeep.catalog.ProductRepository
 import app.shopkeep.documents.DocumentRepository
+import app.shopkeep.listings.ListingRepository
 import app.shopkeep.inventory.MaterialRepository
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.DependencyGraph
@@ -29,6 +30,7 @@ interface AppGraph {
     val materialRepository: MaterialRepository
     val productRepository: ProductRepository
     val documentRepository: DocumentRepository
+    val listingRepository: ListingRepository
 
     @Provides
     @SingleIn(AppScope::class)
