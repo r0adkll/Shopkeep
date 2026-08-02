@@ -50,8 +50,44 @@ object ConnectionsTable : Table("storefront_connections") {
     val status = text("status")
     val lastVerifiedAt = timestampWithTimeZone("last_verified_at").nullable()
     val errorMessage = text("error_message").nullable()
+    val syncCursor = timestampWithTimeZone("sync_cursor").nullable()
     override val primaryKey = PrimaryKey(id)
 }
+
+@Serializable
+data class EtsyMoney(val amount: Long = 0, val divisor: Long = 100, @SerialName("currency_code") val currencyCode: String = "USD") {
+    val minor: Long get() = if (divisor == 0L) amount else amount * 100 / divisor
+}
+
+@Serializable
+data class EtsyVariation(
+    @SerialName("property_id") val propertyId: Long = 0,
+    @SerialName("formatted_name") val name: String = "",
+    @SerialName("formatted_value") val value: String = "",
+)
+
+@Serializable
+data class EtsyTransaction(
+    @SerialName("transaction_id") val transactionId: Long = 0,
+    val title: String = "",
+    val sku: String? = null,
+    val quantity: Int = 1,
+    val price: EtsyMoney = EtsyMoney(),
+    val variations: List<EtsyVariation> = emptyList(),
+)
+
+@Serializable
+data class EtsyReceipt(
+    @SerialName("receipt_id") val receiptId: Long = 0,
+    val name: String = "",
+    @SerialName("message_from_buyer") val messageFromBuyer: String? = null,
+    val grandtotal: EtsyMoney = EtsyMoney(),
+    @SerialName("created_timestamp") val createdTimestamp: Long = 0,
+    val transactions: List<EtsyTransaction> = emptyList(),
+)
+
+@Serializable
+data class EtsyReceipts(val count: Int = 0, val results: List<EtsyReceipt> = emptyList())
 
 object OauthPendingTable : Table("oauth_pending") {
     val state = text("state")
@@ -286,6 +322,32 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                 ConnectionsTable.selectAll().where { ConnectionsTable.id eq id }.single().toConnection()
             }
         }
+    }
+
+    /** Paid receipts since the cursor; refreshes tokens via verify() first. */
+    suspend fun fetchReceipts(connectionId: Long, sinceEpochSeconds: Long?): EtsyReceipts? {
+        val status = verify(connectionId)?.status ?: return null
+        if (status != "connected") return null
+        val row = dbQuery { ConnectionsTable.selectAll().where { ConnectionsTable.id eq connectionId }.single() }
+        val keystring = row[ConnectionsTable.apiKeystring]
+        val secret = row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: ""
+        val access = row[ConnectionsTable.accessTokenEnc]?.let(crypto::decrypt) ?: return null
+        val shopId = row[ConnectionsTable.shopId] ?: return null
+        val since = sinceEpochSeconds?.let { "&min_last_modified=$it" } ?: ""
+        return etsyGet("$apiBase/shops/$shopId/receipts?was_paid=true&limit=100$since", keystring, secret, access)
+    }
+
+    suspend fun connectedIds(): List<Long> = dbQuery {
+        ConnectionsTable.selectAll().where { ConnectionsTable.status eq "connected" }.map { it[ConnectionsTable.id] }
+    }
+
+    suspend fun cursor(connectionId: Long): OffsetDateTime? = dbQuery {
+        ConnectionsTable.selectAll().where { ConnectionsTable.id eq connectionId }
+            .singleOrNull()?.get(ConnectionsTable.syncCursor)
+    }
+
+    suspend fun setCursor(connectionId: Long, at: OffsetDateTime): Unit = dbQuery {
+        ConnectionsTable.update({ ConnectionsTable.id eq connectionId }) { it[syncCursor] = at }
     }
 
     private fun org.jetbrains.exposed.sql.ResultRow.toConnection() = Connection(

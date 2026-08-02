@@ -35,6 +35,8 @@ import io.ktor.server.routing.routing
 import io.ktor.server.sessions.SessionStorage
 import io.ktor.server.sessions.Sessions
 import io.ktor.server.sessions.cookie
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
@@ -93,6 +95,16 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
         }
     }
 
+    // Background storefront poll (vault: Architecture sync loop). Failures log; never crash.
+    launch {
+        delay(30_000)
+        while (true) {
+            runCatching { graph.syncService.syncAll() }
+                .onFailure { log.warn("storefront sync failed: ${it.message}") }
+            delay(config.syncIntervalMinutes * 60_000)
+        }
+    }
+
     routing {
         route("/api/v1") {
             systemRoutes(VERSION)
@@ -102,7 +114,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             catalogRoutes(graph.productRepository)
             documentRoutes(graph.documentRepository)
             listingRoutes(graph.listingRepository)
-            integrationRoutes(graph.connectionRepository, config.baseUrl)
+            integrationRoutes(graph.connectionRepository, graph.syncService, config.baseUrl)
             if (config.etsyMock) {
                 this@shopkeepModule.log.warn("ETSY_MOCK enabled — storefront calls go to the in-process test double")
                 mockEtsyRoutes()

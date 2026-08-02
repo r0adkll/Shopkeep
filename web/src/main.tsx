@@ -15,6 +15,7 @@ import { DashboardPage } from "./pages/Dashboard";
 import { ProductsPage } from "./pages/Products";
 import { ListingsPage } from "./pages/Listings";
 import { ConnectionsPage } from "./pages/Connections";
+import { OrdersPage } from "./pages/Orders";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
@@ -52,6 +53,12 @@ const listingsRoute = createRoute({
   component: ListingsPage,
 });
 
+const ordersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/orders",
+  component: OrdersPage,
+});
+
 const connectionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/connections",
@@ -59,7 +66,7 @@ const connectionsRoute = createRoute({
 });
 
 const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, setupRoute, loginRoute, productsRoute, listingsRoute, connectionsRoute]),
+  routeTree: rootRoute.addChildren([indexRoute, setupRoute, loginRoute, productsRoute, listingsRoute, ordersRoute, connectionsRoute]),
 });
 
 declare module "@tanstack/react-router" {

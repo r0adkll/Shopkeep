@@ -18,6 +18,7 @@ data class AppConfig(
     val tokenEncryptionKey: String,
     /** Mock Etsy test double (dev only): reroutes all Etsy endpoints to /api/v1/mock-etsy. */
     val etsyMock: Boolean,
+    val syncIntervalMinutes: Long,
     val etsyAuthBase: String,
     val etsyTokenBase: String,
     val etsyApiBase: String,
@@ -47,6 +48,7 @@ data class AppConfig(
                 tokenEncryptionKey = env["TOKEN_ENCRYPTION_KEY"]
                     ?: if (devMode) "dev-only-token-key" else missing("TOKEN_ENCRYPTION_KEY"),
                 etsyMock = devMode && env["ETSY_MOCK"] == "true",
+                syncIntervalMinutes = env["SYNC_INTERVAL_MINUTES"]?.toLongOrNull() ?: 5,
                 etsyAuthBase = env["ETSY_AUTH_BASE"] ?: "https://www.etsy.com/oauth/connect",
                 etsyTokenBase = env["ETSY_TOKEN_BASE"] ?: "https://api.etsy.com/v3/public/oauth/token",
                 etsyApiBase = env["ETSY_API_BASE"] ?: "https://openapi.etsy.com/v3/application",

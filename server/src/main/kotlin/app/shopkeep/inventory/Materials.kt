@@ -142,7 +142,7 @@ class MaterialRepository {
         } > 0
     }
 
-    suspend fun recordTransaction(materialId: Long, delta: Double, kind: TxnKind, note: String?, userId: Long): Long =
+    suspend fun recordTransaction(materialId: Long, delta: Double, kind: TxnKind, note: String?, userId: Long?): Long =
         dbQuery {
             InventoryTransactionsTable.insert {
                 it[InventoryTransactionsTable.materialId] = materialId

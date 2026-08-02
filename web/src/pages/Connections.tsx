@@ -61,6 +61,10 @@ export function ConnectionsPage() {
   const justConnected = params.get("connected");
   const oauthError = params.get("error");
 
+  const syncNow = useMutation({
+    mutationFn: (id: number) => req<{ fetched: number; created: number }>(`/connections/${id}/sync`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
+  });
   const verify = useMutation({
     mutationFn: (id: number) => req<Connection>(`/connections/${id}/verify`, { method: "POST" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
@@ -103,6 +107,10 @@ export function ConnectionsPage() {
             </span>
             {isAdmin && (
               <span className="ml-auto flex gap-2">
+                <button type="button" onClick={() => syncNow.mutate(c.id)} disabled={syncNow.isPending}
+                  className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                  {syncNow.isPending ? "Syncing…" : "Sync now"}
+                </button>
                 <button type="button" onClick={() => verify.mutate(c.id)} disabled={verify.isPending}
                   className="rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink2 hover:border-accent hover:text-ink">
                   {verify.isPending ? "Verifying…" : "Verify"}

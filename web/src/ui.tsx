@@ -74,6 +74,7 @@ const TABS = [
   ["Inventory", "/"],
   ["Products", "/products"],
   ["Listings", "/listings"],
+  ["Orders", "/orders"],
   ["Connections", "/connections"],
 ] as const;
 

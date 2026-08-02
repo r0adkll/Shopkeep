@@ -20,10 +20,12 @@ data class StartEtsyRequest(val keystring: String, val sharedSecret: String = ""
 @Serializable
 data class StartEtsyResponse(val authUrl: String, val redirectUri: String)
 
-fun Route.integrationRoutes(connections: ConnectionRepository, baseUrl: String) {
+fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService, baseUrl: String) {
     authenticate(SESSION_AUTH) {
         // Storefront config is admin-only (vault: Users & Auth role matrix).
         get("/integrations/connections") { call.respond(connections.list()) }
+
+        get("/orders") { call.respond(sync.listOrders()) }
 
         get("/integrations/etsy/callback") {
             val state = call.request.queryParameters["state"]
@@ -56,6 +58,12 @@ fun Route.integrationRoutes(connections: ConnectionRepository, baseUrl: String) 
                     redirectUri = "$baseUrl/api/v1/integrations/etsy/callback",
                 ),
             )
+        }
+
+        post("/integrations/connections/{id}/sync") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            if (id == null) call.respond(HttpStatusCode.NotFound, ApiError("Connection not found."))
+            else call.respond(sync.syncConnection(id))
         }
 
         post("/integrations/connections/{id}/verify") {
