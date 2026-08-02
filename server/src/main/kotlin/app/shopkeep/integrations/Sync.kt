@@ -11,12 +11,15 @@ import app.shopkeep.listings.ListingsTable
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
 import org.jetbrains.exposed.sql.json.jsonb
 import org.jetbrains.exposed.sql.selectAll
@@ -201,10 +204,18 @@ class SyncService(
     private val listings: ListingRepository,
     private val lanes: LaneRepository,
 ) {
+    // One sync at a time: the background poller and a manual Sync-now racing
+    // each other produced duplicate-key 500s on the first real ingest.
+    private val syncMutex = Mutex()
+
     suspend fun syncAll(): Map<Long, SyncResult> =
         connections.connectedIds().associateWith { runCatching { syncConnection(it) }.getOrElse { SyncResult(0, 0, 0, 0) } }
 
-    suspend fun syncConnection(connectionId: Long): SyncResult {
+    suspend fun syncConnection(connectionId: Long): SyncResult = syncMutex.withLock {
+        syncConnectionLocked(connectionId)
+    }
+
+    private suspend fun syncConnectionLocked(connectionId: Long): SyncResult {
         val since = connections.cursor(connectionId)?.toEpochSecond()
         val receipts = connections.fetchReceipts(connectionId, since) ?: return SyncResult(0, 0, 0, 0)
         var created = 0
@@ -221,7 +232,9 @@ class SyncService(
             if (exists) continue
 
             val orderId = dbQuery {
-                val oid = OrdersTable.insert {
+                // insertIgnore: cross-process races (second app instance, poller
+                // overlap) degrade to a skip instead of a duplicate-key error.
+                val oid = OrdersTable.insertIgnore {
                     it[OrdersTable.connectionId] = connectionId
                     it[platformOrderId] = receipt.receiptId.toString()
                     it[category] = "new"
@@ -247,14 +260,14 @@ class SyncService(
                     it[discountMinor] = receipt.discountAmt?.minor
                     it[platformPaid] = receipt.isPaid
                     it[platformShipped] = receipt.isShipped
-                } get OrdersTable.id
-                OrderEventsTable.insert {
+                }.resultedValues?.singleOrNull()?.get(OrdersTable.id)
+                if (oid != null) OrderEventsTable.insert {
                     it[OrderEventsTable.orderId] = oid
                     it[fromCategory] = null
                     it[toCategory] = "new"
                 }
                 oid
-            }
+            } ?: continue
             created++
 
             // listingId -> total units, for packaging resolution per order
