@@ -10,8 +10,10 @@ import io.ktor.client.call.body
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
 import io.ktor.client.request.headers
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.URLBuilder
+import io.ktor.http.isSuccess
 import io.ktor.http.parameters
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -243,7 +245,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         val keystring = pending[OauthPendingTable.apiKeystring]
         val sharedSecret = pending[OauthPendingTable.sharedSecret]
 
-        val tokens: EtsyTokens = http.submitForm(
+        val tokenResp = http.submitForm(
             url = tokenBase,
             formParameters = parameters {
                 append("grant_type", "authorization_code")
@@ -252,7 +254,11 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                 append("code", code)
                 append("code_verifier", pending[OauthPendingTable.verifier])
             },
-        ).body()
+        )
+        if (!tokenResp.status.isSuccess()) {
+            error("Etsy token exchange ${tokenResp.status.value}: ${tokenResp.bodyAsText().take(300)}")
+        }
+        val tokens: EtsyTokens = tokenResp.body()
 
         val me: EtsyMe = etsyGet("$apiBase/users/me", keystring, sharedSecret, tokens.accessToken)
         val shopName = me.shopId?.let { sid ->
@@ -281,13 +287,20 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
     }
 
     // Etsy enforcement (Feb 2026): x-api-key is keystring:shared_secret.
-    private suspend inline fun <reified T> etsyGet(url: String, keystring: String, sharedSecret: String, token: String): T =
-        http.get(url) {
+    // Status checked BEFORE deserializing so Etsy's error JSON surfaces as the
+    // actual message instead of a MissingFieldException on our DTO.
+    private suspend inline fun <reified T> etsyGet(url: String, keystring: String, sharedSecret: String, token: String): T {
+        val resp = http.get(url) {
             headers {
                 append("x-api-key", if (sharedSecret.isBlank()) keystring else "$keystring:$sharedSecret")
                 append(HttpHeaders.Authorization, "Bearer $token")
             }
-        }.body()
+        }
+        if (!resp.status.isSuccess()) {
+            error("Etsy ${resp.status.value} on ${url.substringAfter("/v3/")}: ${resp.bodyAsText().take(300)}")
+        }
+        return resp.body()
+    }
 
     /* ---------- lifecycle ---------- */
 
@@ -323,14 +336,18 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             val expiresAt = row[ConnectionsTable.tokenExpiresAt]
             if (expiresAt == null || expiresAt.isBefore(OffsetDateTime.now().plusMinutes(5))) {
                 val refresh = row[ConnectionsTable.refreshTokenEnc]?.let(crypto::decrypt) ?: error("No refresh token.")
-                val tokens: EtsyTokens = http.submitForm(
+                val refreshResp = http.submitForm(
                     url = tokenBase,
                     formParameters = parameters {
                         append("grant_type", "refresh_token")
                         append("client_id", keystring)
                         append("refresh_token", refresh)
                     },
-                ).body()
+                )
+                if (!refreshResp.status.isSuccess()) {
+                    error("Etsy token refresh ${refreshResp.status.value}: ${refreshResp.bodyAsText().take(300)}")
+                }
+                val tokens: EtsyTokens = refreshResp.body()
                 access = tokens.accessToken
                 dbQuery {
                     ConnectionsTable.update({ ConnectionsTable.id eq id }) {
