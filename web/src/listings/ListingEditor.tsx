@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatQty, inventoryApi, materialColor, type Material } from "../inventory/api";
 import { MaterialPicker } from "../inventory/MaterialPicker";
-import { catalogApi, skuCodes, type Product, type ServerConfiguration } from "../catalog/api";
+import { catalogApi, documentUrl, skuCodes, uploadImage, type Product, type ServerConfiguration } from "../catalog/api";
 import { ProductImage } from "../catalog/ProductImage";
 import { Button, ErrorText, Field } from "../ui";
 import {
@@ -155,6 +155,13 @@ export function ListingEditor({
             className="mt-3 w-full rounded-md border border-line bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </div>
+
+        {/* photos & video */}
+        <SectionTitle>
+          Photos &amp; video
+          <Hint>up to 20 photos + 1 video · first photo is the thumbnail</Hint>
+        </SectionTitle>
+        <PhotoStrip ids={l.imageDocumentIds} onChange={(imageDocumentIds) => set({ imageDocumentIds })} />
 
         {/* tags & materials */}
         <SectionTitle>Tags &amp; materials <Hint>tags ≤13 × 20 chars · materials ≤13</Hint></SectionTitle>
@@ -526,6 +533,93 @@ function DangerZone({ listing, onDone }: { listing: Listing; onDone: () => void 
             Delete permanently
           </button>
         ))}
+    </div>
+  );
+}
+
+function PhotoStrip({ ids, onChange }: { ids: number[]; onChange: (ids: number[]) => void }) {
+  const MAX_PHOTOS = 20; // Etsy limit — becomes adapter capability metadata in Phase 3
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const add = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const uploaded: number[] = [];
+      for (const f of [...files].slice(0, MAX_PHOTOS - ids.length)) {
+        uploaded.push(await uploadImage(f, "listing-image"));
+      }
+      onChange([...ids, ...uploaded]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
+      <div className="flex flex-wrap gap-2.5">
+        {ids.map((id, i) => (
+          <div key={id} className="group relative">
+            <img src={documentUrl(id)} alt="" className="h-[74px] w-[74px] rounded-lg border border-line object-cover" />
+            {i === 0 && (
+              <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded bg-accent px-1 text-[8px] font-extrabold tracking-wider text-white">
+                THUMBNAIL
+              </span>
+            )}
+            <div className="absolute -top-1.5 -right-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+              {i !== 0 && (
+                <button
+                  type="button"
+                  title="Make thumbnail"
+                  onClick={() => onChange([id, ...ids.filter((x) => x !== id)])}
+                  className="flex h-5 w-5 items-center justify-center rounded-full border border-line bg-panel text-[10px] text-accent shadow-sm"
+                >
+                  ★
+                </button>
+              )}
+              <button
+                type="button"
+                title="Remove photo"
+                onClick={() => onChange(ids.filter((x) => x !== id))}
+                className="flex h-5 w-5 items-center justify-center rounded-full border border-line bg-panel text-[11px] text-crit shadow-sm"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+        {ids.length < MAX_PHOTOS && (
+          <label className="flex h-[74px] w-[74px] cursor-pointer flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed border-line bg-panel2 text-[11px] text-mut hover:border-accent">
+            {busy ? "…" : "+ photo"}
+            {!busy && <span className="text-[9px]">{ids.length}/{MAX_PHOTOS}</span>}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                void add(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        )}
+        <div
+          className="flex h-[74px] w-[74px] flex-col items-center justify-center rounded-lg border border-dashed border-line text-[10px] text-mut"
+          title="Video upload arrives with the Etsy connect (Phase 3)"
+        >
+          ▷ video
+          <span className="text-[8px] tracking-wider uppercase">Phase 3</span>
+        </div>
+      </div>
+      {error && <p className="mt-2 text-xs font-medium text-crit">{error}</p>}
+      <p className="mt-2 text-[11px] text-mut">
+        Stored in Shopkeep's document store (D12 — pg_dump backs these up too); pushed with the listing once Etsy connects. Hover a photo to promote it to thumbnail or remove it.
+      </p>
     </div>
   );
 }
