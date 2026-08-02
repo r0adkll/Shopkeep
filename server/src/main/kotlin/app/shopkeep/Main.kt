@@ -7,6 +7,7 @@ import app.shopkeep.auth.oidcRoutes
 import app.shopkeep.catalog.catalogRoutes
 import app.shopkeep.documents.documentRoutes
 import app.shopkeep.integrations.integrationRoutes
+import app.shopkeep.integrations.mockEtsyRoutes
 import app.shopkeep.listings.listingRoutes
 import app.shopkeep.inventory.inventoryRoutes
 import app.shopkeep.config.AppConfig
@@ -102,6 +103,10 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             documentRoutes(graph.documentRepository)
             listingRoutes(graph.listingRepository)
             integrationRoutes(graph.connectionRepository, config.baseUrl)
+            if (config.etsyMock) {
+                this@shopkeepModule.log.warn("ETSY_MOCK enabled — storefront calls go to the in-process test double")
+                mockEtsyRoutes()
+            }
         }
 
         // Serve the built SPA when present (vault: D4 — one container serves API + web).

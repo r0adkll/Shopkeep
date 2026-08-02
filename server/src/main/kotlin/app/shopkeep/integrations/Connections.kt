@@ -135,6 +135,9 @@ private data class EtsyShop(@SerialName("shop_name") val shopName: String? = nul
 class ConnectionRepository(private val config: AppConfig, private val http: HttpClient) {
     private val crypto = TokenCrypto(config.tokenEncryptionKey)
     private val redirectUri get() = "${config.baseUrl}/api/v1/integrations/etsy/callback"
+    private val authBase get() = if (config.etsyMock) "${config.baseUrl}/api/v1/mock-etsy/oauth/connect" else config.etsyAuthBase
+    private val tokenBase get() = if (config.etsyMock) "${config.baseUrl}/api/v1/mock-etsy/oauth/token" else config.etsyTokenBase
+    private val apiBase get() = if (config.etsyMock) "${config.baseUrl}/api/v1/mock-etsy" else config.etsyApiBase
 
     /* ---------- OAuth handshake ---------- */
 
@@ -154,7 +157,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                 it[OauthPendingTable.verifier] = verifier
             }
         }
-        val url = URLBuilder("https://www.etsy.com/oauth/connect")
+        val url = URLBuilder(authBase)
         url.parameters.apply {
             append("response_type", "code")
             append("client_id", keystring.trim())
@@ -178,7 +181,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         val sharedSecret = pending[OauthPendingTable.sharedSecret]
 
         val tokens: EtsyTokens = http.submitForm(
-            url = "https://api.etsy.com/v3/public/oauth/token",
+            url = tokenBase,
             formParameters = parameters {
                 append("grant_type", "authorization_code")
                 append("client_id", keystring)
@@ -188,10 +191,10 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             },
         ).body()
 
-        val me: EtsyMe = etsyGet("https://openapi.etsy.com/v3/application/users/me", keystring, sharedSecret, tokens.accessToken)
+        val me: EtsyMe = etsyGet("$apiBase/users/me", keystring, sharedSecret, tokens.accessToken)
         val shopName = me.shopId?.let { sid ->
             runCatching {
-                etsyGet<EtsyShop>("https://openapi.etsy.com/v3/application/shops/$sid", keystring, sharedSecret, tokens.accessToken).shopName
+                etsyGet<EtsyShop>("$apiBase/shops/$sid", keystring, sharedSecret, tokens.accessToken).shopName
             }.getOrNull()
         }
 
@@ -245,7 +248,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             if (expiresAt == null || expiresAt.isBefore(OffsetDateTime.now().plusMinutes(5))) {
                 val refresh = row[ConnectionsTable.refreshTokenEnc]?.let(crypto::decrypt) ?: error("No refresh token.")
                 val tokens: EtsyTokens = http.submitForm(
-                    url = "https://api.etsy.com/v3/public/oauth/token",
+                    url = tokenBase,
                     formParameters = parameters {
                         append("grant_type", "refresh_token")
                         append("client_id", keystring)
@@ -261,7 +264,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                     }
                 }
             }
-            etsyGet<EtsyMe>("https://openapi.etsy.com/v3/application/users/me", keystring, sharedSecret, access)
+            etsyGet<EtsyMe>("$apiBase/users/me", keystring, sharedSecret, access)
             dbQuery {
                 ConnectionsTable.update({ ConnectionsTable.id eq id }) {
                     it[status] = "connected"

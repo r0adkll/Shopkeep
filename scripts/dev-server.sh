@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 
 export SHOPKEEP_DEV=true
 export BASE_URL=http://localhost:5173
+# Until the Etsy app is approved, default to the in-process mock (ETSY_MOCK=false for real keys)
+export ETSY_MOCK=${ETSY_MOCK:-true}
+[ "$ETSY_MOCK" = "true" ] && echo "▸ Etsy MOCK mode — connect flow runs against the built-in test double"
 
 if curl -sf -m 1 http://localhost:5556/.well-known/openid-configuration >/dev/null 2>&1; then
   echo "▸ Dex detected — enabling OIDC (sign in with dev@shopkeep.local / password)"

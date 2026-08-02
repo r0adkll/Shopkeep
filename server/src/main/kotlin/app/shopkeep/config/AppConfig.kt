@@ -16,6 +16,11 @@ data class AppConfig(
     val baseUrl: String,
     /** Encrypts storefront OAuth tokens at rest (vault D12: back this up with the DB). */
     val tokenEncryptionKey: String,
+    /** Mock Etsy test double (dev only): reroutes all Etsy endpoints to /api/v1/mock-etsy. */
+    val etsyMock: Boolean,
+    val etsyAuthBase: String,
+    val etsyTokenBase: String,
+    val etsyApiBase: String,
     // OIDC is optional and env-configured; unset = feature invisible (vault: D10).
     val oidcIssuer: String?,
     val oidcClientId: String?,
@@ -41,6 +46,10 @@ data class AppConfig(
                 baseUrl = env["BASE_URL"] ?: "http://localhost:${env["PORT"]?.toIntOrNull() ?: 8080}",
                 tokenEncryptionKey = env["TOKEN_ENCRYPTION_KEY"]
                     ?: if (devMode) "dev-only-token-key" else missing("TOKEN_ENCRYPTION_KEY"),
+                etsyMock = devMode && env["ETSY_MOCK"] == "true",
+                etsyAuthBase = env["ETSY_AUTH_BASE"] ?: "https://www.etsy.com/oauth/connect",
+                etsyTokenBase = env["ETSY_TOKEN_BASE"] ?: "https://api.etsy.com/v3/public/oauth/token",
+                etsyApiBase = env["ETSY_API_BASE"] ?: "https://openapi.etsy.com/v3/application",
                 oidcIssuer = env["OIDC_ISSUER"]?.takeIf { it.isNotBlank() },
                 oidcClientId = env["OIDC_CLIENT_ID"]?.takeIf { it.isNotBlank() },
                 oidcClientSecret = env["OIDC_CLIENT_SECRET"]?.takeIf { it.isNotBlank() },
