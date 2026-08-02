@@ -442,7 +442,60 @@ export function ListingEditor({
         <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 text-sm text-ink2 hover:text-ink">
           Cancel
         </button>
+        {existing && <DangerZone listing={existing} onDone={onClose} />}
       </div>
+    </div>
+  );
+}
+
+function DangerZone({ listing, onDone }: { listing: Listing; onDone: () => void }) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState<"archive" | "delete" | null>(null);
+  const act = useMutation({
+    mutationFn: async () => {
+      if (confirming === "delete") await listingsApi.delete(listing.id);
+      else await listingsApi.archive(listing.id, !listing.archived);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["listings"] });
+      onDone();
+    },
+  });
+  const neverPublished = listing.syncState === "not_published" && !listing.etsyListingId;
+  return (
+    <div className="mt-2 rounded-xl border border-dashed border-line p-3">
+      {confirming ? (
+        <div className="text-xs">
+          <p className="text-ink2">
+            {confirming === "delete"
+              ? "Permanently delete this never-published listing? Its SKUs are freed for reuse."
+              : listing.archived
+                ? "Restore this listing to the active list?"
+                : "Archive this listing? It hides from active lists; SKUs stay reserved for order history. Once Etsy is connected, archiving a published listing will ask whether to deactivate or delete it on the platform."}
+          </p>
+          <ErrorText>{act.error?.message}</ErrorText>
+          <div className="mt-2 flex gap-2">
+            <button type="button" disabled={act.isPending} onClick={() => act.mutate()}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold text-white ${confirming === "delete" ? "bg-crit" : "bg-accent"}`}>
+              {confirming === "delete" ? "Delete permanently" : listing.archived ? "Restore" : "Archive"}
+            </button>
+            <button type="button" onClick={() => setConfirming(null)} className="rounded-md border border-line px-3 py-1.5 text-xs text-ink2">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-3 text-xs">
+          <button type="button" onClick={() => setConfirming("archive")} className="text-ink2 hover:text-ink">
+            {listing.archived ? "Restore listing" : "Archive listing…"}
+          </button>
+          {neverPublished && !listing.archived && (
+            <button type="button" onClick={() => setConfirming("delete")} className="text-crit hover:underline">
+              Delete…
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

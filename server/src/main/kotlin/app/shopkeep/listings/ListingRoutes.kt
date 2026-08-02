@@ -7,6 +7,7 @@ import io.ktor.server.auth.authenticate
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
@@ -33,7 +34,21 @@ fun Route.listingRoutes(listings: ListingRepository) {
         }
 
         /* listings */
-        get("/listings") { call.respond(listings.list()) }
+        get("/listings") {
+            call.respond(listings.list(call.request.queryParameters["includeArchived"] == "true"))
+        }
+
+        delete("/listings/{id}") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            when (id?.let { listings.delete(it) } ?: ListingRepository.DeleteResult.NOT_FOUND) {
+                ListingRepository.DeleteResult.DELETED -> call.respond(HttpStatusCode.NoContent)
+                ListingRepository.DeleteResult.NOT_FOUND -> call.respond(HttpStatusCode.NotFound, ApiError("Listing not found."))
+                ListingRepository.DeleteResult.PUBLISHED -> call.respond(
+                    HttpStatusCode.Conflict,
+                    ApiError("This listing has been published to a platform — archive it instead. Platform-side removal (deactivate vs delete on Etsy) is chosen at archive time once Etsy is connected."),
+                )
+            }
+        }
         post("/listings") {
             val input = call.receive<ListingInput>()
             val err = validateListing(input)

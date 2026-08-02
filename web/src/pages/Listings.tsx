@@ -23,7 +23,12 @@ export function ListingsPage() {
     if (me.error instanceof ApiError && me.error.status === 401) navigate({ to: "/login" });
   }, [me.error, navigate]);
 
-  const listings = useQuery({ queryKey: ["listings"], queryFn: listingsApi.list, enabled: !!me.data });
+  const [showArchived, setShowArchived] = useState(false);
+  const listings = useQuery({
+    queryKey: ["listings", showArchived],
+    queryFn: () => listingsApi.list(showArchived),
+    enabled: !!me.data,
+  });
   const products = useQuery({ queryKey: ["products"], queryFn: catalogApi.products, enabled: !!me.data });
   useQuery({ queryKey: ["materials"], queryFn: inventoryApi.materials, enabled: !!me.data });
 
@@ -64,9 +69,15 @@ export function ListingsPage() {
         </nav>
         <nav className="ml-auto flex items-center gap-4 text-sm">
           {!editing && (
-            <button type="button" onClick={() => setPicking(true)} className="rounded-md bg-accent px-3.5 py-1.5 font-semibold text-white hover:opacity-90">
-              + Listing
-            </button>
+            <>
+              <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}
+                className={`rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
+                archived
+              </button>
+              <button type="button" onClick={() => setPicking(true)} className="rounded-md bg-accent px-3.5 py-1.5 font-semibold text-white hover:opacity-90">
+                + Listing
+              </button>
+            </>
           )}
           <span className="text-ink2">{me.data.displayName}</span>
           <button type="button" onClick={() => logout.mutate()} className="text-accent hover:underline">Sign out</button>
@@ -110,6 +121,9 @@ export function ListingsPage() {
                   <span className={`rounded-full px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider ${STATE_STYLE[l.input.state] ?? ""}`}>
                     {l.input.state.toUpperCase()}
                   </span>
+                  {l.archived && (
+                    <span className="rounded-full bg-line/60 px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider text-mut">ARCHIVED</span>
+                  )}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink2">
                   <span>{productById.get(l.input.productId)?.name ?? `product ${l.input.productId}`}</span>

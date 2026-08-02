@@ -427,9 +427,10 @@ class ListingRepository(private val products: ProductRepository) {
         )
     }
 
-    suspend fun list(): List<Listing> {
+    suspend fun list(includeArchived: Boolean = false): List<Listing> {
         val ids = dbQuery {
-            ListingsTable.selectAll().where { ListingsTable.archivedAt.isNull() }
+            ListingsTable.selectAll()
+                .let { if (includeArchived) it else it.where { ListingsTable.archivedAt.isNull() } }
                 .orderBy(ListingsTable.id).map { it[ListingsTable.id] }
         }
         return ids.mapNotNull { get(it) }
@@ -439,5 +440,20 @@ class ListingRepository(private val products: ProductRepository) {
         ListingsTable.update({ ListingsTable.id eq id }) {
             it[archivedAt] = if (archived) OffsetDateTime.now() else null
         } > 0
+    }
+
+    enum class DeleteResult { DELETED, NOT_FOUND, PUBLISHED }
+
+    /** Hard delete frees the listing's SKUs — only allowed while the listing has
+     *  never been published to a platform (and, from Phase 4, has no order
+     *  references). Everything else archives, keeping SKUs reserved for history. */
+    suspend fun delete(id: Long): DeleteResult = dbQuery {
+        val row = ListingsTable.selectAll().where { ListingsTable.id eq id }.singleOrNull()
+            ?: return@dbQuery DeleteResult.NOT_FOUND
+        if (row[ListingsTable.etsyListingId] != null || row[ListingsTable.syncState] != "not_published") {
+            return@dbQuery DeleteResult.PUBLISHED
+        }
+        ListingsTable.deleteWhere { ListingsTable.id eq id } // children cascade
+        DeleteResult.DELETED
     }
 }

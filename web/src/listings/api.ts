@@ -83,7 +83,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const listingsApi = {
-  list: () => req<Listing[]>("/listings"),
+  list: (includeArchived = false) => req<Listing[]>(`/listings?includeArchived=${includeArchived}`),
+  delete: (id: number) => fetch(`/api/v1/listings/${id}`, { method: "DELETE" }).then(async (r) => {
+    if (!r.ok) throw new ApiError(r.status, ((await r.json()) as { message: string }).message);
+  }),
   get: (id: number) => req<Listing>(`/listings/${id}`),
   create: (input: ListingInput) => req<Listing>("/listings", { method: "POST", body: JSON.stringify(input) }),
   update: (id: number, input: ListingInput) =>
