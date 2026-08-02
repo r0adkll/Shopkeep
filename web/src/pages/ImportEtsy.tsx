@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { ArrowLeft } from "lucide-react";
 import { ApiError, api } from "../api";
 import { type Material, inventoryApi } from "../inventory/api";
 import { type ProductSummary, catalogApi } from "../catalog/api";
@@ -122,7 +123,7 @@ export function ImportEtsyPage() {
             <h2 className="text-[11px] font-extrabold tracking-widest text-mut uppercase">
               Import from Etsy {conn ? `— ${conn.shopName}` : ""}
             </h2>
-            <Link to="/listings" className="ml-auto text-xs text-accent hover:underline">← back to listings</Link>
+            <Link to="/listings" className="ml-auto flex items-center gap-1 text-xs text-accent hover:underline"><ArrowLeft size={12} /> back to listings</Link>
           </div>
           {!conn && <p className="py-4 text-sm text-ink2">No connected Etsy shop.</p>}
           {listings.isLoading && <p className="py-4 text-sm text-mut">Fetching listings from Etsy…</p>}
@@ -202,7 +203,7 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
   return (
     <div>
       <div className="mb-1 flex flex-wrap items-center gap-3">
-        <button onClick={onBack} className="rounded-lg border border-line bg-panel px-3 py-1 text-xs text-ink2 hover:text-ink">← listings</button>
+        <button onClick={onBack} className="flex items-center gap-1 rounded-lg border border-line bg-panel px-3 py-1 text-xs text-ink2 hover:text-ink"><ArrowLeft size={13} /> listings</button>
         <h2 className="text-[17px] font-bold">{imp.payload.title}</h2>
         {activated != null ? (
           <span className="rounded-full bg-good/10 px-2.5 py-0.5 text-[9px] font-extrabold tracking-wider text-good">IN SYNC · {activated} ORDER LINES RETRO-MATCHED</span>

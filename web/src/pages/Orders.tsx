@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
+import { ChevronLeft, ChevronRight, Copy, Gift, Paperclip, Settings2, X } from "lucide-react";
 import { documentUrl, uploadImage } from "../catalog/api";
 import { NavTabs, Wordmark } from "../ui";
 
@@ -176,11 +177,11 @@ export function OrdersPage() {
         {isAdmin && (
           <button
             onClick={() => setEditing((e) => !e)}
-            className={`ml-auto rounded-lg border px-3.5 py-1.5 text-sm font-semibold transition-colors ${
+            className={`ml-auto flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-semibold transition-colors ${
               editing ? "border-accent text-accent" : "border-line text-ink2 hover:text-ink"
             }`}
           >
-            ⚙ Customize lanes…
+            <Settings2 size={15} /> Customize lanes…
           </button>
         )}
         <span className={`${isAdmin ? "" : "ml-auto "}text-sm text-ink2`}>{me.data.displayName}</span>
@@ -342,9 +343,9 @@ function OrderDetailPanel(props: {
             <span className="rounded bg-panel2 px-1.5 py-0.5 text-[8.5px] font-extrabold tracking-wider text-ink2">ETSY</span>
             <span className="min-w-0 truncate text-[16px] font-bold">{o?.buyerName ?? "…"}</span>
             <span className="ml-auto flex gap-1">
-              <button onClick={() => step(-1)} title="previous (←)" className="h-6 w-6 rounded-md border border-line bg-panel2 text-xs text-ink2 hover:border-accent hover:text-ink">←</button>
-              <button onClick={() => step(1)} title="next (→)" className="h-6 w-6 rounded-md border border-line bg-panel2 text-xs text-ink2 hover:border-accent hover:text-ink">→</button>
-              <button onClick={onClose} title="close (esc)" className="h-6 w-6 rounded-md border border-line bg-panel2 text-xs text-ink2 hover:border-accent hover:text-ink">✕</button>
+              <button onClick={() => step(-1)} title="previous (←)" className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-panel2 text-ink2 hover:border-accent hover:text-ink"><ChevronLeft size={14} /></button>
+              <button onClick={() => step(1)} title="next (→)" className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-panel2 text-ink2 hover:border-accent hover:text-ink"><ChevronRight size={14} /></button>
+              <button onClick={onClose} title="close (esc)" className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-panel2 text-ink2 hover:border-accent hover:text-ink"><X size={14} /></button>
             </span>
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-ink2">
@@ -392,9 +393,9 @@ function OrderDetailPanel(props: {
                             .filter(Boolean).join("\n"),
                         );
                       }}
-                      className="ml-2 rounded-md border border-line bg-panel2 px-2 py-px text-[10px] font-bold text-ink2 normal-case hover:border-accent hover:text-accent"
+                      className="ml-2 flex items-center gap-1 rounded-md border border-line bg-panel2 px-2 py-px text-[10px] font-bold text-ink2 normal-case hover:border-accent hover:text-accent"
                     >
-                      copy
+                      <Copy size={11} /> copy
                     </button>
                   </div>
                   <div className="flex items-start gap-3">
@@ -413,8 +414,8 @@ function OrderDetailPanel(props: {
                         {d.platformShipped ? "✓ SHIPPED" : "NOT SHIPPED"}
                       </span>
                       {d.isGift && (
-                        <span className="rounded-full border border-dashed border-accent bg-accent/10 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-accent">
-                          🎁 GIFT
+                        <span className="flex items-center gap-1 rounded-full border border-dashed border-accent bg-accent/10 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-accent">
+                          <Gift size={10} /> GIFT
                         </span>
                       )}
                     </span>
@@ -655,9 +656,9 @@ function NotesSection({ orderId, notes, onAdded }: { orderId: number; notes: Ord
           />
           <button
             onClick={() => fileInput.current?.click()}
-            className={`rounded-md border border-dashed px-2 py-0.5 text-[11px] ${files.length ? "border-accent text-accent" : "border-line text-ink2"}`}
+            className={`flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 text-[11px] ${files.length ? "border-accent text-accent" : "border-line text-ink2"}`}
           >
-            📎 {files.length ? `${files.length} photo${files.length > 1 ? "s" : ""} ✕` : "Attach photo"}
+            <Paperclip size={11} /> {files.length ? `${files.length} photo${files.length > 1 ? "s" : ""}` : "Attach photo"}
           </button>
           {files.length > 0 && (
             <button onClick={() => setFiles([])} className="text-[11px] text-mut hover:text-crit">clear</button>

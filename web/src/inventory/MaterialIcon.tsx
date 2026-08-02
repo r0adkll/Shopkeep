@@ -4,6 +4,8 @@ import type { CSSProperties } from "react";
  * Tiny hand-drawn stroke icons giving materials a physical identity
  * (vault: Inventory UX — physical metaphors per category). Matched by
  * type keywords first, then category fallback. All stroke/currentColor,
+ * drawn to match Lucide's language (24 grid, stroke 2, round caps) —
+ * see Design Process: use lucide-react for standard icons, match it for custom.
  * so they tint with the material's color where one exists.
  */
 const PATHS: Record<string, string> = {
@@ -68,7 +70,7 @@ export function MaterialIcon({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
