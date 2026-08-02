@@ -7,6 +7,7 @@ import app.shopkeep.config.AppConfig
 import app.shopkeep.catalog.ProductRepository
 import app.shopkeep.documents.DocumentRepository
 import app.shopkeep.integrations.ConnectionRepository
+import app.shopkeep.integrations.LaneRepository
 import app.shopkeep.integrations.SyncService
 import app.shopkeep.listings.ListingRepository
 import app.shopkeep.inventory.MaterialRepository
@@ -35,6 +36,7 @@ interface AppGraph {
     val listingRepository: ListingRepository
     val connectionRepository: ConnectionRepository
     val syncService: SyncService
+    val laneRepository: LaneRepository
 
     @Provides
     @SingleIn(AppScope::class)

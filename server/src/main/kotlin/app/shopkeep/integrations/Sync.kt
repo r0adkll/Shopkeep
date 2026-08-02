@@ -20,6 +20,7 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
 import org.jetbrains.exposed.sql.json.jsonb
 import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.update
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -41,6 +42,10 @@ object OrdersTable : Table("orders") {
     val currency = text("currency")
     val placedAt = timestampWithTimeZone("placed_at").nullable()
     val ingestedAt = timestampWithTimeZone("ingested_at").nullable()
+    val laneId = long("lane_id").nullable()
+    val flagShort = bool("flag_short")
+    val flagAdhoc = bool("flag_adhoc")
+    val completedAt = timestampWithTimeZone("completed_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -68,6 +73,9 @@ object OrderEventsTable : Table("order_events") {
 }
 
 @Serializable
+data class LineColor(val hex: String?, val name: String)
+
+@Serializable
 data class OrderLineView(
     val id: Long,
     val title: String,
@@ -75,6 +83,8 @@ data class OrderLineView(
     val quantity: Int,
     val priceMinor: Long,
     val matchedSku: String?,
+    val productName: String?,
+    val colors: List<LineColor> = emptyList(),
     val variations: List<EtsyVariation>,
     val personalization: List<EtsyVariation>,
 )
@@ -89,6 +99,9 @@ data class OrderView(
     val totalMinor: Long,
     val currency: String,
     val placedAt: String?,
+    val laneId: Long?,
+    val flagShort: Boolean,
+    val flagAdhoc: Boolean,
     val lines: List<OrderLineView>,
 )
 
@@ -104,6 +117,7 @@ class SyncService(
     private val materials: MaterialRepository,
     private val products: ProductRepository,
     private val listings: ListingRepository,
+    private val lanes: LaneRepository,
 ) {
     suspend fun syncAll(): Map<Long, SyncResult> =
         connections.connectedIds().associateWith { runCatching { syncConnection(it) }.getOrElse { SyncResult(0, 0, 0, 0) } }
@@ -146,6 +160,11 @@ class SyncService(
 
             // listingId -> total units, for packaging resolution per order
             val unitsByListing = mutableMapOf<Long, Int>()
+            var anyPersonalized = false
+            var anyUnmatched = false
+            var anyShort = false
+            var anyAdhoc = false
+            var totalUnits = 0
 
             for (txn in receipt.transactions) {
                 val configRow = txn.sku?.let { sku ->
@@ -168,12 +187,14 @@ class SyncService(
                         it[listingConfigurationId] = configRow?.get(ListingConfigurationsTable.id)
                     }
                 }
+                if (personalization.isNotEmpty()) anyPersonalized = true
+                totalUnits += txn.quantity
                 if (configRow != null) {
                     matched++
-                    reserveLine(orderId, receipt.receiptId, configRow, txn.quantity)
+                    if (reserveLine(orderId, receipt.receiptId, configRow, txn.quantity)) anyShort = true
                     val listingId = configRow[ListingConfigurationsTable.listingId]
                     unitsByListing[listingId] = (unitsByListing[listingId] ?: 0) + txn.quantity
-                } else unmatched++
+                } else { unmatched++; anyUnmatched = true }
             }
 
             // Packaging reservations: one band per listing-group per order (D14).
@@ -181,11 +202,32 @@ class SyncService(
                 val listing = listings.get(listingId) ?: continue
                 val profileId = listing.input.packagingProfileId ?: continue
                 val band = listings.resolvePackaging(profileId, units).band ?: continue
+                if (band.kind == "adhoc") anyAdhoc = true
                 for (m in band.materials) {
                     materials.recordTransaction(
                         m.materialId, -m.quantity, TxnKind.RESERVATION,
                         "Order #${receipt.receiptId} packaging", null,
                     )
+                }
+            }
+
+            // Arrival-only routing (locked queue concept) + flags for card chips.
+            val platform = dbQuery {
+                ConnectionsTable.selectAll().where { ConnectionsTable.id eq connectionId }
+                    .single()[ConnectionsTable.platform]
+            }
+            val laneId = lanes.route(OrderFacts(anyPersonalized, anyShort, anyUnmatched, anyAdhoc, platform, totalUnits))
+            val laneName = lanes.list().first { it.id == laneId }.name
+            dbQuery {
+                OrdersTable.update({ OrdersTable.id eq orderId }) {
+                    it[OrdersTable.laneId] = laneId
+                    it[flagShort] = anyShort
+                    it[flagAdhoc] = anyAdhoc
+                }
+                if (laneName != "New") OrderEventsTable.insert {
+                    it[OrderEventsTable.orderId] = orderId
+                    it[fromCategory] = "new"
+                    it[toCategory] = laneName
                 }
             }
         }
@@ -199,29 +241,50 @@ class SyncService(
         receiptId: Long,
         configRow: org.jetbrains.exposed.sql.ResultRow,
         quantity: Int,
-    ) {
+    ): Boolean {
         val listingId = configRow[ListingConfigurationsTable.listingId]
         val selections = configRow[ListingConfigurationsTable.selections]
-        val listing = listings.get(listingId) ?: return
-        val product = products.get(listing.input.productId) ?: return
+        val listing = listings.get(listingId) ?: return false
+        val product = products.get(listing.input.productId) ?: return false
         val note = "Order #$receiptId"
+        var short = false
 
+        suspend fun reserve(materialId: Long, qty: Double) {
+            materials.recordTransaction(materialId, -qty, TxnKind.RESERVATION, note, null)
+            if ((materials.get(materialId)?.stock?.available ?: 0.0) < 0) short = true
+        }
         product.slots.forEachIndexed { idx, slot ->
             val materialId = when (slot.kind) {
                 SlotKind.FIXED -> slot.fixedMaterialId
                 else -> selections.firstOrNull { it.slotIndex == idx }?.materialId
             } ?: return@forEachIndexed
-            materials.recordTransaction(materialId, -(slot.quantity * quantity), TxnKind.RESERVATION, note, null)
+            reserve(materialId, slot.quantity * quantity)
         }
         for (extra in listing.input.extras) {
-            val qty = if (extra.basis == "per_unit") extra.quantity * quantity else extra.quantity
-            materials.recordTransaction(extra.materialId, -qty, TxnKind.RESERVATION, note, null)
+            reserve(extra.materialId, if (extra.basis == "per_unit") extra.quantity * quantity else extra.quantity)
         }
+        return short
     }
 
-    suspend fun listOrders(): List<OrderView> = dbQuery {
-        val configSkus = ListingConfigurationsTable.selectAll()
-            .associate { it[ListingConfigurationsTable.id] to it[ListingConfigurationsTable.sku] }
+    suspend fun listOrders(): List<OrderView> {
+        // configId -> (sku, productName, colors)
+        val configInfo = dbQuery {
+            val listingProduct = ListingsTable.selectAll().associate {
+                it[ListingsTable.id] to it[ListingsTable.productId]
+            }
+            val productNames = app.shopkeep.catalog.ProductsTable.selectAll().associate {
+                it[app.shopkeep.catalog.ProductsTable.id] to it[app.shopkeep.catalog.ProductsTable.name]
+            }
+            ListingConfigurationsTable.selectAll().associate { c ->
+                val pname = listingProduct[c[ListingConfigurationsTable.listingId]]?.let(productNames::get)
+                c[ListingConfigurationsTable.id] to Triple(
+                    c[ListingConfigurationsTable.sku],
+                    pname,
+                    c[ListingConfigurationsTable.selections].map { s -> LineColor(s.color, s.materialName) },
+                )
+            }
+        }
+        return dbQuery {
         OrdersTable.selectAll().orderBy(OrdersTable.id, org.jetbrains.exposed.sql.SortOrder.DESC).map { o ->
             val oid = o[OrdersTable.id]
             OrderView(
@@ -233,6 +296,9 @@ class SyncService(
                 totalMinor = o[OrdersTable.totalMinor],
                 currency = o[OrdersTable.currency],
                 placedAt = o[OrdersTable.placedAt]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                laneId = o[OrdersTable.laneId],
+                flagShort = o[OrdersTable.flagShort],
+                flagAdhoc = o[OrdersTable.flagAdhoc],
                 lines = OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq oid }.map { l ->
                     OrderLineView(
                         id = l[OrderLinesTable.id],
@@ -240,12 +306,15 @@ class SyncService(
                         rawSku = l[OrderLinesTable.rawSku],
                         quantity = l[OrderLinesTable.quantity],
                         priceMinor = l[OrderLinesTable.priceMinor],
-                        matchedSku = l[OrderLinesTable.listingConfigurationId]?.let(configSkus::get),
+                        matchedSku = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.first },
+                        productName = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.second },
+                        colors = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.third } ?: emptyList(),
                         variations = l[OrderLinesTable.variations],
                         personalization = l[OrderLinesTable.personalization],
                     )
                 },
             )
         }
+    }
     }
 }
