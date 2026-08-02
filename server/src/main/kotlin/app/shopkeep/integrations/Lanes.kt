@@ -127,6 +127,10 @@ class LaneRepository(private val materials: MaterialRepository) {
         QueueLanesTable.selectAll().where { QueueLanesTable.role eq "intake" }.first()[QueueLanesTable.id]
     }
 
+    suspend fun doneLaneId(): Long = dbQuery {
+        QueueLanesTable.selectAll().where { QueueLanesTable.role eq "done" }.first()[QueueLanesTable.id]
+    }
+
     /** Arrival-only routing: first matching rule in lane order wins, else intake. */
     suspend fun route(facts: OrderFacts): Long {
         for (lane in list()) {

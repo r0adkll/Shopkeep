@@ -85,6 +85,7 @@ data class EtsyReceipt(
     @SerialName("message_from_buyer") val messageFromBuyer: String? = null,
     val grandtotal: EtsyMoney = EtsyMoney(),
     @SerialName("created_timestamp") val createdTimestamp: Long = 0,
+    val status: String = "paid", // paid|completed|open|payment processing|canceled|fully refunded|partially refunded
     val transactions: List<EtsyTransaction> = emptyList(),
     // Ship-to, status, gift, and money breakdown (order detail concept).
     @SerialName("first_line") val firstLine: String? = null,

@@ -35,8 +35,11 @@ type Order = {
   laneId: number | null;
   flagShort: boolean;
   flagAdhoc: boolean;
+  platformStatus: string;
   lines: OrderLine[];
 };
+
+const DEAD_STATUSES = ["canceled", "fully refunded"];
 type LaneRule = { condition: string; value: string | null };
 type Lane = { id: number | null; name: string; role: string | null; rules: LaneRule[] };
 type OrderMaterial = {
@@ -154,7 +157,8 @@ export function OrdersPage() {
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
   const isAdmin = me.data.role === "ADMIN";
   const laneList = lanes.data ?? [];
-  const all = orders.data ?? [];
+  // Canceled/refunded on Etsy: reservations already released, hidden from the board.
+  const all = (orders.data ?? []).filter((o) => !DEAD_STATUSES.includes(o.platformStatus));
   const doneLaneId = laneList.find((l) => l.role === "done")?.id ?? null;
   const open = all.filter((o) => o.laneId !== doneLaneId);
   const oldest = open.reduce<string | null>(

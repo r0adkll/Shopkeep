@@ -67,6 +67,7 @@ object OrdersTable : Table("orders") {
     val feesMinor = long("fees_minor").nullable()
     val platformPaid = bool("platform_paid")
     val platformShipped = bool("platform_shipped")
+    val platformStatus = text("platform_status")
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -134,6 +135,7 @@ data class OrderView(
     val laneId: Long?,
     val flagShort: Boolean,
     val flagAdhoc: Boolean,
+    val platformStatus: String,
     val lines: List<OrderLineView>,
 )
 
@@ -222,14 +224,20 @@ class SyncService(
         var matched = 0
         var unmatched = 0
 
+        val deadStatuses = setOf("canceled", "fully refunded")
         for (receipt in receipts.results) {
-            val exists = dbQuery {
+            val existing = dbQuery {
                 OrdersTable.selectAll()
                     .where { OrdersTable.connectionId eq connectionId }
                     .andWhere { OrdersTable.platformOrderId eq receipt.receiptId.toString() }
-                    .any()
+                    .singleOrNull()
             }
-            if (exists) continue
+            if (existing != null) {
+                applyStatusUpdate(existing, receipt, deadStatuses)
+                continue
+            }
+            // Already dead on Etsy: never enters the queue at all.
+            if (receipt.status.lowercase() in deadStatuses) continue
 
             val orderId = dbQuery {
                 // insertIgnore: cross-process races (second app instance, poller
@@ -260,6 +268,7 @@ class SyncService(
                     it[discountMinor] = receipt.discountAmt?.minor
                     it[platformPaid] = receipt.isPaid
                     it[platformShipped] = receipt.isShipped
+                    it[platformStatus] = receipt.status.lowercase()
                 }.resultedValues?.singleOrNull()?.get(OrdersTable.id)
                 if (oid != null) OrderEventsTable.insert {
                     it[OrderEventsTable.orderId] = oid
@@ -352,6 +361,60 @@ class SyncService(
         return SyncResult(receipts.results.size, created, matched, unmatched)
     }
 
+    /** Status echo for orders we already track: cancellation releases the
+     *  reservations and hides the order; Etsy-side shipping auto-completes
+     *  (vault: label purchase on Etsy echoes back). */
+    private suspend fun applyStatusUpdate(
+        existing: org.jetbrains.exposed.sql.ResultRow,
+        receipt: EtsyReceipt,
+        deadStatuses: Set<String>,
+    ) {
+        val orderId = existing[OrdersTable.id]
+        val prevStatus = existing[OrdersTable.platformStatus]
+        val prevShipped = existing[OrdersTable.platformShipped]
+        val newStatus = receipt.status.lowercase()
+        if (prevStatus == newStatus && prevShipped == receipt.isShipped) return
+
+        dbQuery {
+            OrdersTable.update({ OrdersTable.id eq orderId }) {
+                it[platformStatus] = newStatus
+                it[platformPaid] = receipt.isPaid
+                it[platformShipped] = receipt.isShipped
+            }
+        }
+        val nowDead = newStatus in deadStatuses && prevStatus !in deadStatuses
+        if (nowDead && existing[OrdersTable.completedAt] == null) {
+            releaseReservations(existing[OrdersTable.platformOrderId])
+            dbQuery {
+                OrderEventsTable.insert {
+                    it[OrderEventsTable.orderId] = orderId
+                    it[fromCategory] = null
+                    it[toCategory] = "canceled on Etsy — reservations released"
+                }
+            }
+        } else if (receipt.isShipped && !prevShipped && existing[OrdersTable.completedAt] == null &&
+            newStatus !in deadStatuses
+        ) {
+            lanes.move(orderId, lanes.doneLaneId(), null)
+        }
+    }
+
+    /** Cancellation: outstanding reservations come back (lifecycle invariant #3). */
+    private suspend fun releaseReservations(platformOrderId: String) = dbQuery {
+        val note = "Order #$platformOrderId"
+        app.shopkeep.inventory.InventoryTransactionsTable.selectAll()
+            .where { app.shopkeep.inventory.InventoryTransactionsTable.kind eq "reservation" }
+            .andWhere { app.shopkeep.inventory.InventoryTransactionsTable.note like "$note%" }
+            .forEach { txn ->
+                app.shopkeep.inventory.InventoryTransactionsTable.insert {
+                    it[materialId] = txn[app.shopkeep.inventory.InventoryTransactionsTable.materialId]
+                    it[delta] = txn[app.shopkeep.inventory.InventoryTransactionsTable.delta].negate()
+                    it[kind] = TxnKind.RELEASE.name.lowercase()
+                    it[app.shopkeep.inventory.InventoryTransactionsTable.note] = "$note (canceled)"
+                }
+            }
+    }
+
     /** Reserve the line's full bill of materials: recipe slots + listing extras. */
     private suspend fun reserveLine(
         orderId: Long,
@@ -416,6 +479,7 @@ class SyncService(
                 laneId = o[OrdersTable.laneId],
                 flagShort = o[OrdersTable.flagShort],
                 flagAdhoc = o[OrdersTable.flagAdhoc],
+                platformStatus = o[OrdersTable.platformStatus],
                 lines = OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq oid }.map { l ->
                     OrderLineView(
                         id = l[OrderLinesTable.id],
