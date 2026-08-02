@@ -84,9 +84,18 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const listingsApi = {
   list: (includeArchived = false) => req<Listing[]>(`/listings?includeArchived=${includeArchived}`),
-  delete: (id: number) => fetch(`/api/v1/listings/${id}`, { method: "DELETE" }).then(async (r) => {
-    if (!r.ok) throw new ApiError(r.status, ((await r.json()) as { message: string }).message);
-  }),
+  delete: async (id: number) => {
+    const r = await fetch(`/api/v1/listings/${id}`, { method: "DELETE" });
+    if (!r.ok) {
+      let message = r.status === 404 ? "Endpoint missing — restart the dev server?" : r.statusText;
+      try {
+        message = ((await r.json()) as { message: string }).message;
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new ApiError(r.status, message);
+    }
+  },
   get: (id: number) => req<Listing>(`/listings/${id}`),
   create: (input: ListingInput) => req<Listing>("/listings", { method: "POST", body: JSON.stringify(input) }),
   update: (id: number, input: ListingInput) =>
