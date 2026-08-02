@@ -452,7 +452,6 @@ function SlotCard({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("color");
   const categories = [...new Set(all.map((m) => m.category))];
-  const byId = new Map(all.map((m) => [m.id, m]));
   const unit = slot.fixedMaterialId
     ? byId.get(slot.fixedMaterialId)?.unit
     : byId.get(slot.optionMaterialIds[0] ?? -1)?.unit;
