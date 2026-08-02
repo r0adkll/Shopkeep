@@ -45,8 +45,10 @@ object EtsyImportsTable : Table("etsy_imports") {
 @Serializable
 data class ImportValueMapping(
     val value: String,
-    val resolution: String = "unmapped", // material | review | ignore | unmapped
+    val resolution: String = "unmapped", // material | design | variant | review | ignore | unmapped
     val materialId: Long? = null,
+    val designId: Long? = null,
+    val variantId: Long? = null,
 )
 
 @Serializable
@@ -129,7 +131,12 @@ class ImportRepository(
         val m = imp.mapping
         val productId = m.productId ?: error("Link a product first.")
         val unresolved = m.axes.filter { it.slotPosition != null }
-            .flatMap { it.values }.count { it.resolution == "unmapped" || (it.resolution == "material" && it.materialId == null) }
+            .flatMap { it.values }.count {
+                it.resolution == "unmapped" ||
+                    (it.resolution == "material" && it.materialId == null) ||
+                    (it.resolution == "design" && it.designId == null) ||
+                    (it.resolution == "variant" && it.variantId == null)
+            }
         require(unresolved == 0) { "$unresolved value(s) still unresolved." }
 
         val payload = imp.payload
@@ -152,6 +159,14 @@ class ImportRepository(
                             AxisValueInput(materialId = v.materialId!!, platformValue = v.value)
                         },
                     )
+                },
+                valueResolutions = m.axes.flatMap { ax ->
+                    ax.values.filter { it.resolution in setOf("design", "variant", "review", "ignore") }.map { v ->
+                        app.shopkeep.listings.ValueResolution(
+                            axis = ax.name, value = v.value, kind = v.resolution,
+                            refId = v.designId ?: v.variantId,
+                        )
+                    }
                 },
             ),
         )

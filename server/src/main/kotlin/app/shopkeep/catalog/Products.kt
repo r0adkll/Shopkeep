@@ -53,6 +53,7 @@ object ProductSlotsTable : Table("product_slots") {
     val quantity = decimal("quantity", 12, 3)
     val fixedMaterialId = long("fixed_material_id").nullable()
     val defaultMaterialId = long("default_material_id").nullable()
+    val optional = bool("optional")
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -88,6 +89,7 @@ data class SlotInput(
     val fixedMaterialId: Long? = null,
     val defaultMaterialId: Long? = null,
     val optionMaterialIds: List<Long> = emptyList(),
+    val optional: Boolean = false, // consumed only when a design assigns it (D20)
 )
 
 @Serializable
@@ -220,6 +222,7 @@ class ProductRepository(private val materials: MaterialRepository) {
                 it[quantity] = BigDecimal.valueOf(slot.quantity)
                 it[fixedMaterialId] = slot.fixedMaterialId
                 it[defaultMaterialId] = slot.defaultMaterialId
+                it[optional] = slot.optional
             } get ProductSlotsTable.id
             slot.optionMaterialIds.forEach { mat ->
                 ProductSlotOptionsTable.insert {
@@ -277,6 +280,7 @@ class ProductRepository(private val materials: MaterialRepository) {
                     fixedMaterialId = s[ProductSlotsTable.fixedMaterialId],
                     defaultMaterialId = s[ProductSlotsTable.defaultMaterialId],
                     optionMaterialIds = options[s[ProductSlotsTable.id]] ?: emptyList(),
+                    optional = s[ProductSlotsTable.optional],
                 )
             },
             rules = ruleRows.map { r ->

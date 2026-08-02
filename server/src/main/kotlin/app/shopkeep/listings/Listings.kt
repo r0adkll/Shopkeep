@@ -67,6 +67,7 @@ object ListingsTable : Table("listings") {
     val platformState = text("platform_state").nullable()
     val lastPushedAt = timestampWithTimeZone("last_pushed_at").nullable()
     val archivedAt = timestampWithTimeZone("archived_at").nullable()
+    val valueResolutions = jsonb<List<ValueResolution>>("value_resolutions", Json.Default)
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -128,6 +129,14 @@ data class Personalization(
 )
 
 @Serializable
+data class ValueResolution(
+    val axis: String,
+    val value: String,
+    val kind: String, // design | variant | review | ignore
+    val refId: Long? = null,
+)
+
+@Serializable
 data class AxisValueInput(
     val materialId: Long,
     val offered: Boolean = true,
@@ -161,6 +170,7 @@ data class ListingInput(
     val axes: List<AxisInput> = emptyList(),
     val extras: List<ExtraInput> = emptyList(),
     val disabledSkus: List<String> = emptyList(),
+    val valueResolutions: List<ValueResolution> = emptyList(),
 )
 
 @Serializable
@@ -363,6 +373,7 @@ class ListingRepository(private val products: ProductRepository) {
     }
 
     private fun ListingsTable.write(it: org.jetbrains.exposed.sql.statements.UpdateBuilder<*>, input: ListingInput) {
+        it[valueResolutions] = input.valueResolutions
         it[productId] = input.productId
         it[title] = input.title.trim()
         it[description] = input.description
@@ -408,6 +419,7 @@ class ListingRepository(private val products: ProductRepository) {
         Listing(
             id = row[ListingsTable.id],
             input = ListingInput(
+                valueResolutions = row[ListingsTable.valueResolutions],
                 productId = row[ListingsTable.productId],
                 title = row[ListingsTable.title],
                 description = row[ListingsTable.description],

@@ -211,6 +211,7 @@ class SyncService(
     private val products: ProductRepository,
     private val listings: ListingRepository,
     private val lanes: LaneRepository,
+    private val designs: app.shopkeep.catalog.DesignRepository,
 ) {
     // One sync at a time: the background poller and a manual Sync-now racing
     // each other produced duplicate-key 500s on the first real ingest.
@@ -436,6 +437,10 @@ class SyncService(
         val productId: Long,
         val selections: List<app.shopkeep.catalog.ConfigSelection>,
         val needsReview: Boolean,
+        /** Fully-expanded BOM (materialId -> qty per unit): choice slots via
+         *  material/design resolution (incl. qty overrides + override sets),
+         *  fixed slots, variant slot-deltas and extra materials. */
+        val bom: List<Pair<Long, Double>>,
     )
 
     /** Etsy listing id -> Shopkeep listing (listing_level mode) -> variation
@@ -450,41 +455,87 @@ class SyncService(
         val product = products.get(listing.input.productId) ?: return null
         var review = false
         val selections = mutableListOf<app.shopkeep.catalog.ConfigSelection>()
-        for (axis in listing.input.axes) {
-            val varVal = txn.variations.firstOrNull {
-                it.propertyId != PERSONALIZATION_PROPERTY_ID && it.name.equals(axis.displayName, ignoreCase = true)
-            }?.value
-            val hit = varVal?.let { v -> axis.values.firstOrNull { it.platformValue.equals(v, ignoreCase = true) } }
-            if (hit == null) { review = true; continue }
-            val mat = materials.get(hit.materialId) ?: continue
-            val slot = product.slots.getOrNull(axis.productSlotPosition)
+        val bom = mutableMapOf<Long, Double>()
+        fun addBom(materialId: Long, qty: Double) { bom[materialId] = (bom[materialId] ?: 0.0) + qty }
+        val orderValues = txn.variations.filter { it.propertyId != PERSONALIZATION_PROPERTY_ID }
+        val resolutions = listing.input.valueResolutions
+        var variantAdj: app.shopkeep.catalog.VariantAdjustments? = null
+        val slotQty = { pos: Int -> product.slots.getOrNull(pos)?.quantity ?: 0.0 }
+
+        suspend fun addSelection(slotPos: Int, materialId: Long, qty: Double) {
+            val mat = materials.get(materialId) ?: return
+            addBom(materialId, qty)
             selections += app.shopkeep.catalog.ConfigSelection(
-                slotIndex = axis.productSlotPosition,
-                slotName = slot?.name ?: axis.displayName,
-                materialId = mat.id,
-                materialName = mat.name,
-                color = mat.attributes["color"],
+                slotIndex = slotPos,
+                slotName = product.slots.getOrNull(slotPos)?.name ?: "slot $slotPos",
+                materialId = mat.id, materialName = mat.name, color = mat.attributes["color"],
             )
         }
-        return ImportedResolution(listing.id, listing.input.productId, selections, review)
+
+        for (axis in listing.input.axes) {
+            val varVal = orderValues.firstOrNull { it.name.equals(axis.displayName, ignoreCase = true) }?.value
+            if (varVal == null) { review = true; continue }
+            // 1) plain material mapping on this axis
+            val hit = axis.values.firstOrNull { it.platformValue.equals(varVal, ignoreCase = true) }
+            if (hit != null) { addSelection(axis.productSlotPosition, hit.materialId, slotQty(axis.productSlotPosition)); continue }
+            // 2) design / variant / review / ignore resolution
+            val res = resolutions.firstOrNull { it.axis.equals(axis.displayName, true) && it.value.equals(varVal, true) }
+            when (res?.kind) {
+                "design" -> {
+                    val d = res.refId?.let { designs.design(it) }
+                    if (d == null) { review = true; continue }
+                    // composition modifier: any other order value matching an override-set key
+                    val set = d.overrideSets.firstOrNull { os ->
+                        orderValues.any { it.value.equals(os.key, ignoreCase = true) }
+                    }
+                    for (a in (set?.assignments ?: d.assignments)) {
+                        addSelection(a.slotPosition, a.materialId, a.qtyOverride ?: slotQty(a.slotPosition))
+                    }
+                }
+                "variant" -> {
+                    val v = res.refId?.let { designs.variant(it) }
+                    if (v == null) { review = true } else variantAdj = v.adjustments
+                }
+                "ignore" -> {}
+                else -> review = true // "review" or unmapped value
+            }
+        }
+        // resolutions can also live on non-slot axes (e.g. a style axis mapped to variants)
+        for (res in resolutions) {
+            if (res.kind != "variant" || variantAdj != null) continue
+            if (orderValues.any { it.name.equals(res.axis, true) && it.value.equals(res.value, true) }) {
+                val v = res.refId?.let { designs.variant(it) }
+                if (v != null) variantAdj = v.adjustments else review = true
+            }
+        }
+        // fixed slots
+        product.slots.forEach { slot ->
+            if (slot.kind == SlotKind.FIXED && slot.fixedMaterialId != null) addBom(slot.fixedMaterialId!!, slot.quantity)
+        }
+        // variant adjustments: slot deltas apply to whatever material filled the slot
+        variantAdj?.let { adj ->
+            adj.slotDeltas.forEach { d ->
+                val target = selections.firstOrNull { it.slotIndex == d.slotPosition }?.materialId
+                    ?: product.slots.getOrNull(d.slotPosition)?.fixedMaterialId
+                if (target != null) {
+                    if (d.removed) bom[target] = ((bom[target] ?: 0.0) - slotQty(d.slotPosition)).coerceAtLeast(0.0)
+                    else if (d.deltaQty != null) bom[target] = ((bom[target] ?: 0.0) + d.deltaQty).coerceAtLeast(0.0)
+                }
+            }
+            adj.extras.forEach { e -> addBom(e.materialId, e.quantity) }
+        }
+        return ImportedResolution(
+            listing.id, listing.input.productId, selections, review,
+            bom.filterValues { it > 0 }.toList(),
+        )
     }
 
-    /** Reserve a dynamically-resolved line: chosen slot materials + fixed slots. */
+    /** Reserve a dynamically-resolved line from its fully-expanded BOM. */
     private suspend fun reserveResolved(r: ImportedResolution, quantity: Int, note: String): Boolean {
-        val product = products.get(r.productId) ?: return false
         var short = false
-        suspend fun reserve(materialId: Long, qty: Double) {
-            materials.recordTransaction(materialId, -qty, TxnKind.RESERVATION, note, null)
+        for ((materialId, qty) in r.bom) {
+            materials.recordTransaction(materialId, -qty * quantity, TxnKind.RESERVATION, note, null)
             if ((materials.get(materialId)?.stock?.available ?: 0.0) < 0) short = true
-        }
-        r.selections.forEach { sel ->
-            val slotQty = product.slots.getOrNull(sel.slotIndex)?.quantity ?: return@forEach
-            reserve(sel.materialId, slotQty * quantity)
-        }
-        product.slots.forEachIndexed { _, slot ->
-            if (slot.kind == SlotKind.FIXED && slot.fixedMaterialId != null) {
-                reserve(slot.fixedMaterialId!!, slot.quantity * quantity)
-            }
         }
         return short
     }

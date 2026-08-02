@@ -10,6 +10,7 @@ export type Slot = {
   fixedMaterialId: number | null;
   defaultMaterialId: number | null;
   optionMaterialIds: number[];
+  optional?: boolean;
 };
 
 export type Rule = {

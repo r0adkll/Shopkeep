@@ -19,7 +19,7 @@ type EtsyListing = {
   tags: string[];
   inventory: { products: { sku: string | null; property_values: { property_name: string; values: string[] }[]; offerings: { price: { amount: number; divisor: number } }[] }[] } | null;
 };
-type ValueMapping = { value: string; resolution: string; materialId: number | null };
+type ValueMapping = { value: string; resolution: string; materialId: number | null; designId?: number | null; variantId?: number | null };
 type AxisMapping = { name: string; slotPosition: number | null; values: ValueMapping[] };
 type Mapping = { productId: number | null; axes: AxisMapping[] };
 type EtsyImport = { id: number; connectionId: number; etsyListingId: string; payload: EtsyListing; mapping: Mapping; listingId: number | null };
@@ -174,12 +174,23 @@ export function ImportEtsyPage() {
 function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; products: ProductSummary[]; onBack: () => void }) {
   const { imp, materials, products, onBack } = props;
   const [mapping, setMapping] = useState<Mapping>(imp.mapping);
+  const designs = useQuery({
+    queryKey: ["designs", mapping.productId],
+    queryFn: () => jsonFetch<{ id: number; name: string }[]>(`/api/v1/catalog/products/${mapping.productId}/designs`),
+    enabled: mapping.productId != null,
+  });
+  const variants = useQuery({
+    queryKey: ["variants", mapping.productId],
+    queryFn: () => jsonFetch<{ id: number; name: string }[]>(`/api/v1/catalog/products/${mapping.productId}/variants`),
+    enabled: mapping.productId != null,
+  });
   const [error, setError] = useState<string | null>(null);
   const [activated, setActivated] = useState<number | null>(null);
   const matById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
 
   const resolvedCount = mapping.axes.filter((a) => a.slotPosition != null).flatMap((a) => a.values)
-    .filter((v) => v.resolution !== "unmapped" && !(v.resolution === "material" && v.materialId == null)).length;
+    .filter((v) => v.resolution !== "unmapped" && !(v.resolution === "material" && v.materialId == null)
+      && !(v.resolution === "design" && v.designId == null) && !(v.resolution === "variant" && v.variantId == null)).length;
   const totalCount = mapping.axes.filter((a) => a.slotPosition != null).flatMap((a) => a.values).length;
   const complete = mapping.productId != null && resolvedCount === totalCount && totalCount > 0;
 
@@ -259,18 +270,26 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
                     <span className="w-36 flex-none truncate" title={v.value}>{v.value}</span>
                     <span className="flex-none text-[10px] text-mut">→</span>
                     <select
-                      value={v.resolution === "material" ? String(v.materialId ?? "") : v.resolution}
+                      value={
+                        v.resolution === "material" ? String(v.materialId ?? "")
+                        : v.resolution === "design" ? `d:${v.designId ?? ""}`
+                        : v.resolution === "variant" ? `v:${v.variantId ?? ""}`
+                        : v.resolution
+                      }
                       onChange={(e) => {
                         const val = e.target.value;
                         setAxis(i, (a) => ({
                           ...a,
-                          values: a.values.map((x, xi) =>
-                            xi === vi
-                              ? val === "review" || val === "ignore" || val === "unmapped"
-                                ? { ...x, resolution: val, materialId: null }
-                                : { ...x, resolution: "material", materialId: Number(val) }
-                              : x,
-                          ),
+                          values: a.values.map((x, xi) => {
+                            if (xi !== vi) return x;
+                            if (val === "review" || val === "ignore" || val === "unmapped")
+                              return { ...x, resolution: val, materialId: null, designId: null, variantId: null };
+                            if (val.startsWith("d:"))
+                              return { ...x, resolution: "design", materialId: null, designId: Number(val.slice(2)), variantId: null };
+                            if (val.startsWith("v:"))
+                              return { ...x, resolution: "variant", materialId: null, designId: null, variantId: Number(val.slice(2)) };
+                            return { ...x, resolution: "material", materialId: Number(val), designId: null, variantId: null };
+                          }),
                         }));
                       }}
                       className={`min-w-0 flex-1 rounded border bg-panel px-1.5 py-0.5 text-xs outline-none ${v.resolution === "unmapped" ? "border-warn" : "border-line"}`}
@@ -278,9 +297,21 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
                       <option value="unmapped">— pick a material…</option>
                       <option value="review">review per order</option>
                       <option value="ignore">no material impact</option>
+                      {(designs.data ?? []).length > 0 && (
+                        <optgroup label="Designs (colorways)">
+                          {designs.data!.map((d) => <option key={`d${d.id}`} value={`d:${d.id}`}>{d.name}</option>)}
+                        </optgroup>
+                      )}
+                      {(variants.data ?? []).length > 0 && (
+                        <optgroup label="Variants (build styles)">
+                          {variants.data!.map((d) => <option key={`v${d.id}`} value={`v:${d.id}`}>{d.name}</option>)}
+                        </optgroup>
+                      )}
+                      <optgroup label="Materials">
                       {materials.filter((m) => !m.archived).map((m) => (
                         <option key={m.id} value={m.id}>{m.name}</option>
                       ))}
+                      </optgroup>
                     </select>
                     <span
                       className="h-2.5 w-2.5 flex-none rounded-full border border-line"

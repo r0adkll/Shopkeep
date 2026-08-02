@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { DesignsTab, VariantsTab } from "./DesignsEditor";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   formatQty,
@@ -37,6 +38,7 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
   const laborRate = useQuery({ queryKey: ["laborRate"], queryFn: catalogApi.laborRate });
 
   const [p, setP] = useState<ProductInput>(existing ?? EMPTY);
+  const [tab, setTab] = useState<"recipe" | "designs" | "variants">("recipe");
   const [composer, setComposer] = useState<{ index: number | null; rule: Rule } | null>(null);
 
   const byId = useMemo(() => new Map((materials.data ?? []).map((m) => [m.id, m])), [materials.data]);
@@ -109,6 +111,26 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_280px]">
       <div>
+        {/* D20: Recipe | Designs | Variants tabs (existing products only) */}
+        {existing?.id != null && (
+          <div className="mb-4 flex gap-0.5 border-b border-line">
+            {(["recipe", "designs", "variants"] as const).map((t) => (
+              <button
+                key={t} type="button" onClick={() => setTab(t)}
+                className={`relative top-px border-b-2 px-4 py-2 text-[13px] font-semibold capitalize ${tab === t ? "border-accent font-bold text-accent" : "border-transparent text-ink2 hover:text-ink"}`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+        {existing?.id != null && tab === "designs" && (
+          <DesignsTab productId={existing.id} slots={p.slots} materials={materials.data ?? []} />
+        )}
+        {existing?.id != null && tab === "variants" && (
+          <VariantsTab productId={existing.id} slots={p.slots} materials={materials.data ?? []} />
+        )}
+        <div style={{ display: tab === "recipe" ? undefined : "none" }}>
         {/* product header */}
         <div className="rounded-xl border border-line bg-panel p-5 shadow-sm">
           <div className="flex gap-4">
@@ -306,6 +328,7 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
             </div>
           </>
         )}
+        </div>
       </div>
 
       {/* summary rail */}
