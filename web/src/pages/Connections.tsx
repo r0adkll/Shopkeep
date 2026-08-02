@@ -141,6 +141,7 @@ export function ConnectionsPage() {
 
 function ConnectEtsy() {
   const [keystring, setKeystring] = useState("");
+  const [sharedSecret, setSharedSecret] = useState("");
   const [label, setLabel] = useState("");
   const redirectUri = `${window.location.origin}/api/v1/integrations/etsy/callback`;
 
@@ -148,7 +149,7 @@ function ConnectEtsy() {
     mutationFn: () =>
       req<{ authUrl: string }>("/etsy/start", {
         method: "POST",
-        body: JSON.stringify({ keystring, label }),
+        body: JSON.stringify({ keystring, sharedSecret, label }),
       }),
     onSuccess: (r) => {
       window.location.href = r.authUrl;
@@ -167,23 +168,29 @@ function ConnectEtsy() {
           Add this callback URL to the app:
           <code className="mt-1 block w-fit rounded bg-panel2 px-2 py-1 font-mono text-[11px] select-all">{redirectUri}</code>
         </li>
-        <li>Paste the app's <b>keystring</b> below and connect — Etsy will ask you to grant access to your shop.</li>
+        <li>
+          Paste the app's <b>keystring</b> and <b>shared secret</b> below (both shown in Your Apps — Etsy requires
+          both on every API call since Feb 2026), then connect. Etsy will ask you to grant access to your shop.
+        </li>
       </ol>
-      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_180px]">
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <Field label="Keystring" value={keystring} onChange={setKeystring} />
+        <Field label="Shared secret" value={sharedSecret} onChange={setSharedSecret} />
+      </div>
+      <div className="mt-3 max-w-60">
         <Field label="Label (optional)" value={label} onChange={setLabel} />
       </div>
       <ErrorText>{start.error?.message}</ErrorText>
       <button
         type="button"
-        disabled={!keystring.trim() || start.isPending}
+        disabled={!keystring.trim() || !sharedSecret.trim() || start.isPending}
         onClick={() => start.mutate()}
         className="mt-3 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
       >
         {start.isPending ? "Starting…" : "Connect to Etsy →"}
       </button>
       <p className="mt-2 text-[11px] text-mut">
-        Requested scopes: transactions_r/w · listings_r/w. Tokens are encrypted at rest; verification shows exactly
+        Requested scopes: transactions_r/w · listings_r/w. The shared secret and tokens are encrypted at rest; verification shows exactly
         what your current key grants.
       </p>
     </Card>

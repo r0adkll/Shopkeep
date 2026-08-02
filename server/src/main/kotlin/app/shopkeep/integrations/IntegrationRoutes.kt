@@ -15,7 +15,7 @@ import io.ktor.server.routing.post
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class StartEtsyRequest(val keystring: String, val label: String = "")
+data class StartEtsyRequest(val keystring: String, val sharedSecret: String = "", val label: String = "")
 
 @Serializable
 data class StartEtsyResponse(val authUrl: String, val redirectUri: String)
@@ -46,13 +46,13 @@ fun Route.integrationRoutes(connections: ConnectionRepository, baseUrl: String) 
     requireAdmin {
         post("/integrations/etsy/start") {
             val req = call.receive<StartEtsyRequest>()
-            if (req.keystring.isBlank()) {
-                call.respond(HttpStatusCode.UnprocessableEntity, ApiError("The Etsy app keystring is required."))
+            if (req.keystring.isBlank() || req.sharedSecret.isBlank()) {
+                call.respond(HttpStatusCode.UnprocessableEntity, ApiError("Keystring and shared secret are both required (Etsy enforces keystring:secret since Feb 2026)."))
                 return@post
             }
             call.respond(
                 StartEtsyResponse(
-                    authUrl = connections.startEtsy(req.keystring, req.label),
+                    authUrl = connections.startEtsy(req.keystring, req.sharedSecret, req.label),
                     redirectUri = "$baseUrl/api/v1/integrations/etsy/callback",
                 ),
             )

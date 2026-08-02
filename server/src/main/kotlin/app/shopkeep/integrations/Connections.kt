@@ -39,6 +39,7 @@ object ConnectionsTable : Table("storefront_connections") {
     val platform = text("platform")
     val label = text("label")
     val apiKeystring = text("api_keystring")
+    val apiSharedSecretEnc = text("api_shared_secret_enc").nullable()
     val shopId = text("shop_id").nullable()
     val shopName = text("shop_name").nullable()
     val userRef = text("user_ref").nullable()
@@ -56,6 +57,7 @@ object OauthPendingTable : Table("oauth_pending") {
     val state = text("state")
     val platform = text("platform")
     val apiKeystring = text("api_keystring")
+    val sharedSecret = text("shared_secret")
     val label = text("label")
     val verifier = text("verifier")
     override val primaryKey = PrimaryKey(state)
@@ -136,7 +138,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
 
     /* ---------- OAuth handshake ---------- */
 
-    suspend fun startEtsy(keystring: String, label: String): String {
+    suspend fun startEtsy(keystring: String, sharedSecret: String, label: String): String {
         val rng = SecureRandom()
         val state = ByteArray(24).also(rng::nextBytes).let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
         val verifier = ByteArray(48).also(rng::nextBytes).let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
@@ -147,6 +149,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                 it[OauthPendingTable.state] = state
                 it[platform] = "etsy"
                 it[apiKeystring] = keystring.trim()
+                it[OauthPendingTable.sharedSecret] = sharedSecret.trim()
                 it[OauthPendingTable.label] = label.trim()
                 it[OauthPendingTable.verifier] = verifier
             }
@@ -172,6 +175,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             }
         } ?: error("OAuth state mismatch — start the connection again.")
         val keystring = pending[OauthPendingTable.apiKeystring]
+        val sharedSecret = pending[OauthPendingTable.sharedSecret]
 
         val tokens: EtsyTokens = http.submitForm(
             url = "https://api.etsy.com/v3/public/oauth/token",
@@ -184,10 +188,10 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             },
         ).body()
 
-        val me: EtsyMe = etsyGet("https://openapi.etsy.com/v3/application/users/me", keystring, tokens.accessToken)
+        val me: EtsyMe = etsyGet("https://openapi.etsy.com/v3/application/users/me", keystring, sharedSecret, tokens.accessToken)
         val shopName = me.shopId?.let { sid ->
             runCatching {
-                etsyGet<EtsyShop>("https://openapi.etsy.com/v3/application/shops/$sid", keystring, tokens.accessToken).shopName
+                etsyGet<EtsyShop>("https://openapi.etsy.com/v3/application/shops/$sid", keystring, sharedSecret, tokens.accessToken).shopName
             }.getOrNull()
         }
 
@@ -196,6 +200,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                 it[platform] = "etsy"
                 it[label] = pending[OauthPendingTable.label]
                 it[apiKeystring] = keystring
+                it[apiSharedSecretEnc] = sharedSecret.takeIf { s -> s.isNotBlank() }?.let(crypto::encrypt)
                 it[shopId] = me.shopId?.toString()
                 it[ConnectionsTable.shopName] = shopName
                 it[userRef] = me.userId.toString()
@@ -209,10 +214,11 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         }
     }
 
-    private suspend inline fun <reified T> etsyGet(url: String, keystring: String, token: String): T =
+    // Etsy enforcement (Feb 2026): x-api-key is keystring:shared_secret.
+    private suspend inline fun <reified T> etsyGet(url: String, keystring: String, sharedSecret: String, token: String): T =
         http.get(url) {
             headers {
-                append("x-api-key", keystring)
+                append("x-api-key", if (sharedSecret.isBlank()) keystring else "$keystring:$sharedSecret")
                 append(HttpHeaders.Authorization, "Bearer $token")
             }
         }.body()
@@ -232,6 +238,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         val row = dbQuery { ConnectionsTable.selectAll().where { ConnectionsTable.id eq id }.singleOrNull() }
             ?: return null
         val keystring = row[ConnectionsTable.apiKeystring]
+        val sharedSecret = row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: ""
         return try {
             var access = row[ConnectionsTable.accessTokenEnc]?.let(crypto::decrypt) ?: error("No token stored.")
             val expiresAt = row[ConnectionsTable.tokenExpiresAt]
@@ -254,7 +261,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                     }
                 }
             }
-            etsyGet<EtsyMe>("https://openapi.etsy.com/v3/application/users/me", keystring, access)
+            etsyGet<EtsyMe>("https://openapi.etsy.com/v3/application/users/me", keystring, sharedSecret, access)
             dbQuery {
                 ConnectionsTable.update({ ConnectionsTable.id eq id }) {
                     it[status] = "connected"
