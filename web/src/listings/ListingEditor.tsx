@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatQty, inventoryApi, materialColor, type Material } from "../inventory/api";
-import { catalogApi, skuCodes, type Product } from "../catalog/api";
+import { catalogApi, skuCodes, type Product, type ServerConfiguration } from "../catalog/api";
+import { ProductImage } from "../catalog/ProductImage";
 import { Button, ErrorText, Field } from "../ui";
 import {
   listingsApi,
@@ -66,6 +67,10 @@ export function ListingEditor({
   const materials = useQuery({ queryKey: ["materials"], queryFn: inventoryApi.materials });
   const profiles = useQuery({ queryKey: ["packagingProfiles"], queryFn: listingsApi.profiles });
   const laborRate = useQuery({ queryKey: ["laborRate"], queryFn: catalogApi.laborRate });
+  const productConfigs = useQuery({
+    queryKey: ["productConfigs", product.id],
+    queryFn: () => catalogApi.configurations(product.id),
+  });
   const byId = useMemo(() => new Map((materials.data ?? []).map((m) => [m.id, m])), [materials.data]);
 
   const [l, setL] = useState<ListingInput>(existing?.input ?? defaultInput(product, byId));
@@ -88,32 +93,58 @@ export function ListingEditor({
   const offeredCount = l.axes.map((a) => a.values.filter((v) => v.offered).length);
   const laborMinor = Math.round(((laborRate.data?.rateMinor ?? 0) * product.laborMinutes) / 60);
 
+  // The listing IS a projection of the product: derive the live configuration
+  // matrix from the recipe, filtered to what this listing offers.
+  const derived: ServerConfiguration[] = useMemo(() => {
+    const offeredBySlot = new Map(
+      l.axes.map((a) => [a.productSlotPosition, new Set(a.values.filter((v) => v.offered).map((v) => v.materialId))]),
+    );
+    return (productConfigs.data ?? []).filter(
+      (c) =>
+        c.resolved &&
+        c.sku != null &&
+        c.selections.every((s) => offeredBySlot.get(s.slotIndex)?.has(s.materialId) ?? true),
+    );
+  }, [productConfigs.data, l.axes]);
+  const bomMin = derived.length ? Math.min(...derived.map((c) => c.materialCostMinor)) : 0;
+  const bomMax = derived.length ? Math.max(...derived.map((c) => c.materialCostMinor)) : 0;
+
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_270px]">
       <div className="min-w-0">
-        {/* header */}
+        {/* header — anchored to the recipe it projects */}
         <div className="rounded-xl border border-line bg-panel p-5 shadow-sm">
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              value={l.title}
-              onChange={(e) => set({ title: e.target.value })}
-              className="min-w-60 flex-1 border-b border-dashed border-transparent bg-transparent text-lg font-semibold outline-none focus:border-accent"
-            />
-            <select
-              value={l.state}
-              onChange={(e) => set({ state: e.target.value as ListingInput["state"] })}
-              className={`rounded-full border border-line px-2.5 py-1 text-[10px] font-extrabold tracking-wider ${
-                l.state === "active" ? "bg-good/10 text-good" : l.state === "draft" ? "bg-panel2 text-ink2" : "bg-warn/10 text-warn"
-              }`}
-            >
-              <option value="draft">DRAFT</option>
-              <option value="active">ACTIVE</option>
-              <option value="inactive">INACTIVE</option>
-            </select>
-          </div>
-          <div className={`mt-1 text-[11px] ${l.title.length > 140 ? "font-bold text-warn" : "text-mut"}`}>
-            {l.title.length}/140 · Etsy title limit · from recipe <b className="text-ink2">{product.name}</b>{" "}
-            <span className="font-mono">{product.skuPrefix}</span>
+          <div className="flex gap-4">
+            <ProductImage imageDocumentId={product.imageDocumentId} size={56} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  value={l.title}
+                  onChange={(e) => set({ title: e.target.value })}
+                  className="min-w-60 flex-1 border-b border-dashed border-transparent bg-transparent text-lg font-semibold outline-none focus:border-accent"
+                />
+                <select
+                  value={l.state}
+                  onChange={(e) => set({ state: e.target.value as ListingInput["state"] })}
+                  className={`rounded-full border border-line px-2.5 py-1 text-[10px] font-extrabold tracking-wider ${
+                    l.state === "active" ? "bg-good/10 text-good" : l.state === "draft" ? "bg-panel2 text-ink2" : "bg-warn/10 text-warn"
+                  }`}
+                >
+                  <option value="draft">DRAFT</option>
+                  <option value="active">ACTIVE</option>
+                  <option value="inactive">INACTIVE</option>
+                </select>
+              </div>
+              <div className={`mt-1 text-[11px] ${l.title.length > 140 ? "font-bold text-warn" : "text-mut"}`}>
+                {l.title.length}/140 · Etsy title limit
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink2">
+                <span className="text-[10px] font-extrabold tracking-widest text-accent">RECIPE</span>
+                <b>{product.name}</b>
+                <span className="font-mono text-mut">{product.skuPrefix}</span>
+                <span className="text-mut">{product.slots.length} slots · {product.laborMinutes} min labor · variations &amp; costs derive from it</span>
+              </div>
+            </div>
           </div>
           <textarea
             rows={3}
@@ -233,49 +264,72 @@ export function ListingEditor({
           </div>
         ))}
 
-        {/* configurations */}
-        {existing && existing.configurations.length > 0 && (
-          <>
-            <SectionTitle>
-              Configurations <span className="font-mono font-normal text-mut">{existing.configurations.length}</span>
-              <Hint>durable SKUs — unchecking hides a pair (pushed as is_enabled=false)</Hint>
-            </SectionTitle>
-            <div className="overflow-x-auto rounded-xl border border-line bg-panel shadow-sm">
-              <table className="w-full min-w-[480px] border-collapse text-[13px]">
-                <tbody>
-                  {existing.configurations.map((c) => {
-                    const disabled = l.disabledSkus.includes(c.sku);
-                    return (
-                      <tr key={c.sku} className={disabled ? "opacity-45" : ""}>
-                        <td className="border-b border-line/40 px-3 py-1.5">
-                          <input
-                            type="checkbox"
-                            checked={!disabled}
-                            onChange={(e) =>
-                              set({
-                                disabledSkus: e.target.checked
-                                  ? l.disabledSkus.filter((s) => s !== c.sku)
-                                  : [...l.disabledSkus, c.sku],
-                              })
-                            }
-                            className="h-4 w-4 accent-accent"
-                          />
-                        </td>
-                        {c.selections.map((s) => (
-                          <td key={s.slotIndex} className="border-b border-line/40 px-3 py-1.5 text-ink2">
-                            <span className="mr-1.5 inline-block h-3 w-3 rounded-full border border-line align-[-1px]" style={{ background: s.color ?? "var(--color-panel2)" }} />
-                            {s.materialName}
-                          </td>
-                        ))}
-                        <td className="border-b border-line/40 px-3 py-1.5 font-mono font-semibold">{c.sku}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
+        {/* derived configurations — live from the recipe, always visible */}
+        <SectionTitle>
+          Configurations <span className="font-mono font-normal text-mut">{derived.length}</span>
+          <Hint>derived live from the recipe · SKUs become durable on save · unchecking hides a pair (is_enabled=false)</Hint>
+        </SectionTitle>
+        <div className="overflow-x-auto rounded-xl border border-line bg-panel shadow-sm">
+          <table className="w-full min-w-[560px] border-collapse text-[13px]">
+            <thead>
+              <tr className="text-left text-[10px] tracking-widest text-mut uppercase">
+                <th className="border-b border-line px-3 py-2"></th>
+                {derived[0]?.selections.map((s) => (
+                  <th key={s.slotIndex} className="border-b border-line px-3 py-2">{s.slotName}</th>
+                ))}
+                <th className="border-b border-line px-3 py-2">SKU</th>
+                <th className="border-b border-line px-3 py-2">BOM</th>
+                <th className="border-b border-line px-3 py-2">Buildable</th>
+              </tr>
+            </thead>
+            <tbody>
+              {derived.map((c) => {
+                const disabled = l.disabledSkus.includes(c.sku!);
+                const durable = existing?.configurations.some((x) => x.sku === c.sku);
+                return (
+                  <tr key={c.sku} className={disabled ? "opacity-45" : ""}>
+                    <td className="border-b border-line/40 px-3 py-1.5">
+                      <input
+                        type="checkbox"
+                        checked={!disabled}
+                        onChange={(e) =>
+                          set({
+                            disabledSkus: e.target.checked
+                              ? l.disabledSkus.filter((s) => s !== c.sku)
+                              : [...l.disabledSkus, c.sku!],
+                          })
+                        }
+                        className="h-4 w-4 accent-accent"
+                      />
+                    </td>
+                    {c.selections.map((s) => (
+                      <td key={s.slotIndex} className="border-b border-line/40 px-3 py-1.5 text-ink2">
+                        <span className="mr-1.5 inline-block h-3 w-3 rounded-full border border-line align-[-1px]" style={{ background: s.color ?? "var(--color-panel2)" }} />
+                        {s.materialName}
+                      </td>
+                    ))}
+                    <td className="border-b border-line/40 px-3 py-1.5 font-mono font-semibold">
+                      {c.sku}
+                      {existing && !durable && <span className="ml-1.5 text-[9px] font-extrabold tracking-wider text-accent" title="new combination — becomes durable on save">NEW</span>}
+                    </td>
+                    <td className="border-b border-line/40 px-3 py-1.5 font-mono">{money(c.materialCostMinor)}</td>
+                    <td
+                      className={`border-b border-line/40 px-3 py-1.5 font-mono font-bold ${
+                        (c.buildableUnits ?? 0) < 3 ? "text-crit" : (c.buildableUnits ?? 0) < 8 ? "text-warn" : "text-good"
+                      }`}
+                      title={c.cappedBy ? `limited by ${c.cappedBy}` : undefined}
+                    >
+                      {c.buildableUnits}
+                    </td>
+                  </tr>
+                );
+              })}
+              {derived.length === 0 && (
+                <tr><td className="px-3 py-3 text-mut" colSpan={5}>No configurations — offer at least one value per axis.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
         {/* extras */}
         <SectionTitle>Per-order extras <Hint>consumed by every order, beyond the recipe</Hint></SectionTitle>
@@ -343,15 +397,15 @@ export function ListingEditor({
           <div className="mt-2 text-xs text-ink2">
             {(() => {
               const base = Math.round(parseFloat(priceStr || "0") * 100);
-              const cost = (productCost(product, byId) ?? 0) + laborMinor;
-              const margin = base - cost;
-              return base > 0 ? (
+              if (!base) return <span className="text-mut">set a price to see margin</span>;
+              const lo = bomMin + laborMinor;
+              const hi = bomMax + laborMinor;
+              const range = (a: number, b: number) => (a === b ? money(a) : `${money(a)}–${money(b)}`);
+              return (
                 <>
-                  unit cost {money(cost)} → margin{" "}
-                  <b className={margin > 0 ? "text-good" : "text-crit"}>{money(margin)}</b> before fees
+                  unit cost {range(lo, hi)} <span className="text-mut">(BOM + {product.laborMinutes} min labor)</span> → margin{" "}
+                  <b className={base - hi > 0 ? "text-good" : "text-crit"}>{range(base - hi, base - lo)}</b> before fees
                 </>
-              ) : (
-                <span className="text-mut">set a price to see margin</span>
               );
             })()}
           </div>
@@ -390,17 +444,6 @@ export function ListingEditor({
       </div>
     </div>
   );
-}
-
-function productCost(product: Product, byId: Map<number, Material>): number | null {
-  let total = 0;
-  for (const s of product.slots) {
-    const ids = s.fixedMaterialId ? [s.fixedMaterialId] : s.optionMaterialIds;
-    const costs = ids.map((id) => byId.get(id)).filter(Boolean)
-      .map((m) => (m!.costQuantity > 0 ? (s.quantity * m!.costMinor) / m!.costQuantity : 0));
-    if (costs.length) total += Math.min(...costs);
-  }
-  return Math.round(total);
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {

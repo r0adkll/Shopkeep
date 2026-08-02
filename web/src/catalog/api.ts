@@ -61,9 +61,19 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+export type ServerConfiguration = {
+  sku: string | null;
+  selections: { slotIndex: number; slotName: string; materialId: number; materialName: string; color: string | null }[];
+  resolved: boolean;
+  materialCostMinor: number;
+  buildableUnits: number | null;
+  cappedBy: string | null;
+};
+
 export const catalogApi = {
   products: () => req<ProductSummary[]>("/products"),
   product: (id: number) => req<Product>(`/products/${id}`),
+  configurations: (id: number) => req<ServerConfiguration[]>(`/products/${id}/configurations`),
   create: (input: ProductInput) => req<Product>("/products", { method: "POST", body: JSON.stringify(input) }),
   update: (id: number, input: ProductInput) =>
     req<Product>(`/products/${id}`, { method: "PUT", body: JSON.stringify(input) }),
