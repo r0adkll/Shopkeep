@@ -778,18 +778,24 @@ export function ListingEditor({
                   setPullingPhotos(true);
                   const res = await fetch(`/api/v1/listings/${existing.id}/pull-photos`, { method: "POST" });
                   const j = await res.json().catch(() => null);
-                  setPullingPhotos(false);
                   if (res.ok) {
+                    // refresh editor state in place — no navigation
+                    const fresh = await listingsApi.get(existing.id);
+                    setL(fresh.input);
+                    setSavedBaseline(JSON.stringify(fresh.input));
+                    setPriceStr((fresh.input.basePriceMinor / 100).toFixed(2));
                     queryClient.invalidateQueries({ queryKey: ["listings"] });
                     queryClient.invalidateQueries({ queryKey: ["push-preview"] });
-                    window.location.reload();
                   } else alert(j?.message ?? "Pull failed");
+                  setPullingPhotos(false);
                 }}
                 disabled={pullingPhotos}
                 title="replace Shopkeep's photo set with Etsy's current images (downloads into the document store; nothing re-pushes)"
                 className="mt-1.5 w-full rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink2 hover:border-accent hover:text-ink disabled:opacity-50"
               >
-                {pullingPhotos ? "Pulling photos…" : "⬇ Pull photos from Etsy"}
+                <span className="flex items-center justify-center gap-1.5">
+                  <ImageDown size={13} /> {pullingPhotos ? "Pulling photos…" : "Pull photos from Etsy"}
+                </span>
               </button>
             </>
           )}
