@@ -69,7 +69,7 @@ export function Wordmark() {
 /** shadcn/ui-style skeleton: loading states mirror the final layout
  *  (never a lone spinner or bare "Loading…" for content-shaped regions). */
 export function Skeleton({ className = "" }: { className?: string }) {
-  return <div className={`animate-pulse rounded-md bg-line2 ${className}`} />;
+  return <div className={`skeleton-shimmer rounded-md ${className}`} />;
 }
 
 export function ErrorText({ children }: { children: ReactNode }) {

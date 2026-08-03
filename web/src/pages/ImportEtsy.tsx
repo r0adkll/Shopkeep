@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { type Material, inventoryApi } from "../inventory/api";
 import { type ProductSummary, catalogApi } from "../catalog/api";
@@ -128,8 +128,15 @@ export function ImportEtsyPage() {
           {!conn && <p className="py-4 text-sm text-ink2">No connected Etsy shop.</p>}
           {listings.isLoading && (
             <div aria-busy="true" aria-label="Fetching listings from Etsy">
+              <div className="mb-2 flex items-center gap-2.5 rounded-lg bg-panel2 px-4 py-2.5 text-sm text-ink2">
+                <Loader2 size={16} className="flex-none animate-spin text-accent" />
+                <span>
+                  Fetching listings from <b className="text-ink">{conn?.shopName ?? "Etsy"}</b>
+                  <span className="text-mut"> — active + draft, with full variation trees. Usually a few seconds.</span>
+                </span>
+              </div>
               {[0, 1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex items-center gap-3 border-b border-line/60 py-3 last:border-0">
+                <div key={i} className="flex items-center gap-3 border-b border-line/60 py-3 last:border-0" style={{ opacity: 1 - i * 0.13 }}>
                   <Skeleton className="h-4 flex-1 basis-64" />
                   <Skeleton className="h-3 w-16" />
                   <Skeleton className="h-3 w-40" />
@@ -137,7 +144,6 @@ export function ImportEtsyPage() {
                   <Skeleton className="h-7 w-20 rounded-lg" />
                 </div>
               ))}
-              <p className="pt-3 text-center text-xs text-mut">Fetching your live listings from Etsy — this asks for active and draft listings with their full variation trees, usually a few seconds.</p>
             </div>
           )}
           {(listings.data ?? []).map((l) => {
