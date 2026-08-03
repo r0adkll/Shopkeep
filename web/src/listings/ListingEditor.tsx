@@ -745,10 +745,10 @@ export function ListingEditor({
                   {dirty ? "UNSAVED EDITS" : pushPreview.isLoading ? "CHECKING…" : (pushPreview.data?.changes.length ?? 0) > 0 ? `${pushPreview.data!.changes.length} TO PUSH` : "IN SYNC"}
                 </span>
                 <a
-                  href={`https://www.etsy.com/listing/${existing.etsyListingId}`}
+                  href={`https://www.etsy.com/your/shops/me/listing-editor/edit/${existing.etsyListingId}`}
                   target="_blank" rel="noreferrer"
                   className="flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
-                  title="open this listing on Etsy"
+                  title="open in Etsy's listing editor"
                 >
                   #{existing.etsyListingId} <ExternalLink size={10} />
                 </a>
