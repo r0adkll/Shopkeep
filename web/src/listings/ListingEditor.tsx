@@ -347,6 +347,34 @@ export function ListingEditor({
                 }
                 className="w-40 border-b border-dashed border-line bg-transparent font-semibold outline-none focus:border-accent"
               />
+              <span className="text-xs text-mut">values from</span>
+              <select
+                value={axis.valueSource ?? "materials"}
+                onChange={(e) => {
+                  const src = e.target.value;
+                  const values =
+                    src === "designs"
+                      ? (pDesigns.data ?? []).map((d) => ({ materialId: null, offered: true, designId: d.id, displayLabel: d.name }))
+                      : src === "variants"
+                        ? (pVariants.data ?? []).map((d) => ({ materialId: null, offered: true, variantId: d.id, displayLabel: d.name }))
+                        : src === "override_sets"
+                          ? [
+                              { materialId: null, offered: true, overrideKey: "base", displayLabel: "Standard" },
+                              ...[...new Set((pDesigns.data ?? []).flatMap((d) => d.overrideSets.map((o) => o.key)))].map((k) => ({ materialId: null, offered: true, overrideKey: k, displayLabel: k })),
+                            ]
+                          : defaultInput(product, byId).axes[ai]?.values ?? [];
+                  set({
+                    axes: l.axes.map((a, j) => (j === ai ? { ...a, valueSource: src, values } : a)),
+                  });
+                }}
+                className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
+                title="where this axis's values come from"
+              >
+                <option value="materials">slot materials — one material per choice</option>
+                <option value="designs">this product's designs (multi-color colorways)</option>
+                <option value="variants">this product's variants (Slim, Cable Winder…)</option>
+                <option value="override_sets">design override sets (editions)</option>
+              </select>
               {(axis.valueSource ?? "materials") === "materials" ? (
                 <>
                   <span className="text-xs text-mut">fills →</span>
@@ -386,35 +414,6 @@ export function ListingEditor({
               >
                 <Trash2 size={14} />
               </button>
-              {/* value source (locked seam concept): materials | designs | variants | override sets */}
-              <select
-                value={axis.valueSource ?? "materials"}
-                onChange={(e) => {
-                  const src = e.target.value;
-                  const values =
-                    src === "designs"
-                      ? (pDesigns.data ?? []).map((d) => ({ materialId: null, offered: true, designId: d.id, displayLabel: d.name }))
-                      : src === "variants"
-                        ? (pVariants.data ?? []).map((d) => ({ materialId: null, offered: true, variantId: d.id, displayLabel: d.name }))
-                        : src === "override_sets"
-                          ? [
-                              { materialId: null, offered: true, overrideKey: "base", displayLabel: "Standard" },
-                              ...[...new Set((pDesigns.data ?? []).flatMap((d) => d.overrideSets.map((o) => o.key)))].map((k) => ({ materialId: null, offered: true, overrideKey: k, displayLabel: k })),
-                            ]
-                          : defaultInput(product, byId).axes[ai]?.values ?? [];
-                  set({
-                    axes: l.axes.map((a, j) => (j === ai ? { ...a, valueSource: src, values } : a)),
-
-                  });
-                }}
-                className="ml-auto rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
-                title="where this axis's values come from"
-              >
-                <option value="materials">values: one material per choice (fills a recipe slot)</option>
-                <option value="designs">values: this product's designs (multi-color colorways)</option>
-                <option value="variants">values: this product's variants (Slim, Cable Winder…)</option>
-                <option value="override_sets">values: design override sets (editions)</option>
-              </select>
             </div>
             <div className="mt-2 space-y-1">
               {axis.values.map((v, vi) => {
