@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { inventoryApi, type Material, type MaterialInput } from "./api";
 import { Button, ErrorText, Field } from "../ui";
 
@@ -72,6 +72,8 @@ export function MaterialForm({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const allMaterials = useQuery({ queryKey: ["materials"], queryFn: inventoryApi.materials });
+  const brandSuggestions = [...new Set((allMaterials.data ?? []).map((x) => x.brand).filter((b): b is string => !!b))].sort();
   const [m, setM] = useState<MaterialInput>(existing ?? EMPTY);
   const [costDollars, setCostDollars] = useState(existing ? (existing.costMinor / 100).toFixed(2) : "");
   const [initialQty, setInitialQty] = useState("");
@@ -165,7 +167,19 @@ export function MaterialForm({
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <Field label="Name" value={m.name} onChange={(v) => set({ name: v })} autoFocus />
-      <Field label="Brand" value={m.brand ?? ""} onChange={(v) => set({ brand: v || null })} />
+      <label className="block">
+        <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">Brand</span>
+        <input
+          value={m.brand ?? ""}
+          onChange={(e) => set({ brand: e.target.value || null })}
+          list="brand-suggestions"
+          placeholder={brandSuggestions[0] ? `e.g. ${brandSuggestions.slice(0, 3).join(", ")}…` : undefined}
+          className="w-full rounded-md border border-line bg-panel2 px-3 py-2 text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+        />
+        <datalist id="brand-suggestions">
+          {brandSuggestions.map((b) => <option key={b} value={b} />)}
+        </datalist>
+      </label>
             </div>
 
             {/* Type: dropdown for filament, suggestions for other known categories */}
