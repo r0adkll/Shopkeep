@@ -165,6 +165,7 @@ export function MaterialForm({
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <Field label="Name" value={m.name} onChange={(v) => set({ name: v })} autoFocus />
+      <Field label="Brand" value={m.brand ?? ""} onChange={(v) => set({ brand: v || null })} />
             </div>
 
             {/* Type: dropdown for filament, suggestions for other known categories */}

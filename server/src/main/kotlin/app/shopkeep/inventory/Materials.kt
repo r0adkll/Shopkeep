@@ -35,6 +35,7 @@ enum class StockStatus { OK, LOW, CRITICAL }
 object MaterialsTable : Table("materials") {
     val id = long("id").autoIncrement()
     val name = text("name")
+    val brand = text("brand").nullable()
     val category = text("category")
     val type = text("type")
     val unit = text("unit")
@@ -69,6 +70,7 @@ data class Stock(val onHand: Double, val reserved: Double, val available: Double
 data class Material(
     val id: Long,
     val name: String,
+    val brand: String? = null,
     val category: String,
     val type: String,
     val unit: String,
@@ -88,6 +90,7 @@ data class Material(
 @Serializable
 data class MaterialInput(
     val name: String,
+    val brand: String? = null,
     val category: String,
     val type: String,
     val unit: String,
@@ -199,6 +202,7 @@ class MaterialRepository {
 
     private fun MaterialsTable.apply(it: org.jetbrains.exposed.sql.statements.UpdateBuilder<*>, input: MaterialInput) {
         it[name] = input.name.trim()
+        it[brand] = input.brand?.trim()?.takeIf { b -> b.isNotEmpty() }
         it[category] = input.category.trim().lowercase()
         it[type] = input.type.trim()
         it[unit] = input.unit.trim()
@@ -225,6 +229,7 @@ class MaterialRepository {
         return Material(
             id = this[MaterialsTable.id],
             name = this[MaterialsTable.name],
+            brand = this[MaterialsTable.brand],
             category = this[MaterialsTable.category],
             type = this[MaterialsTable.type],
             unit = this[MaterialsTable.unit],

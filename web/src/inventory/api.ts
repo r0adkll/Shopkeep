@@ -8,6 +8,7 @@ export type Stock = { onHand: number; reserved: number; available: number };
 export type Material = {
   id: number;
   name: string;
+  brand?: string | null;
   category: string;
   type: string;
   unit: string;
