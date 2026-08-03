@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Loader2, RotateCw, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, Loader2, RotateCw, X } from "lucide-react";
 
 /* D17 review & push (locked concept 2026-08-03): grouped change list, one
  * field per line, all-or-nothing push; drift rows carry the only escape
@@ -19,9 +19,44 @@ const KIND_CHIP: Record<string, [string, string]> = {
   drift: ["DRIFT — ETSY CHANGED THIS", "bg-warn/10 text-warn"],
 };
 const PULLABLE = new Set(["Title", "Description", "Price", "Quantity", "Tags", "State"]);
+const EXPAND_THRESHOLD = 90;
+
+/** Word-level LCS diff: removals struck red, additions bold green. */
+function WordDiff({ oldText, newText }: { oldText: string; newText: string }) {
+  const a = oldText.split(/(\s+)/);
+  const b = newText.split(/(\s+)/);
+  const n = a.length, m = b.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const parts: { t: string; k: "same" | "del" | "add" }[] = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { parts.push({ t: a[i], k: "same" }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { parts.push({ t: a[i], k: "del" }); i++; }
+    else { parts.push({ t: b[j], k: "add" }); j++; }
+  }
+  while (i < n) parts.push({ t: a[i++], k: "del" });
+  while (j < m) parts.push({ t: b[j++], k: "add" });
+  return (
+    <div className="rounded-lg border border-line bg-panel2 px-3 py-2.5 text-[12.5px] leading-relaxed whitespace-pre-wrap">
+      {parts.map((p, k) =>
+        p.k === "same" ? (
+          <span key={k}>{p.t}</span>
+        ) : p.k === "del" ? (
+          <span key={k} className="bg-crit/10 text-crit line-through decoration-crit/70">{p.t}</span>
+        ) : (
+          <span key={k} className="bg-good/10 font-bold text-good">{p.t}</span>
+        ),
+      )}
+    </div>
+  );
+}
 
 export function PushReview({ listingId, onClose, onPushed }: { listingId: number; onClose: () => void; onPushed: () => void }) {
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pushed, setPushed] = useState(false);
@@ -102,16 +137,28 @@ export function PushReview({ listingId, onClose, onPushed }: { listingId: number
                 </div>
                 {rows.map((c, i) => {
                   const [label, tone] = KIND_CHIP[c.kind] ?? [c.kind.toUpperCase(), "bg-panel2 text-mut"];
+                  const key = `${sec}:${c.field}:${i}`;
+                  const long = (c.oldValue?.length ?? 0) > EXPAND_THRESHOLD || (c.newValue?.length ?? 0) > EXPAND_THRESHOLD
+                    || (c.oldValue ?? "").includes("\n") || (c.newValue ?? "").includes("\n");
+                  const isOpen = expanded.has(key);
+                  const clip = (v: string) => (v.length > EXPAND_THRESHOLD ? v.slice(0, EXPAND_THRESHOLD) + "…" : v);
                   return (
                     <div key={i}>
-                      <div className={`flex flex-wrap items-baseline gap-2.5 rounded-md px-2 py-1.5 text-[13px] ${i % 2 ? "" : "bg-panel2"}`}>
+                      <div
+                        className={`flex flex-wrap items-baseline gap-2.5 rounded-md px-2 py-1.5 text-[13px] ${i % 2 ? "" : "bg-panel2"} ${long ? "cursor-pointer" : ""}`}
+                        onClick={long ? () => setExpanded((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; }) : undefined}
+                        title={long ? (isOpen ? "collapse" : "expand full diff") : undefined}
+                      >
+                        {long && <ChevronRight size={12} className={`relative top-0.5 flex-none text-mut transition-transform ${isOpen ? "rotate-90" : ""}`} />}
                         <span className="w-28 flex-none text-xs text-ink2">{c.field}</span>
-                        {c.oldValue != null && <span className="text-mut line-through decoration-crit/60">{c.oldValue}</span>}
-                        {c.oldValue != null && c.newValue != null && <span className="text-[11px] text-mut">→</span>}
-                        {c.newValue != null && <span className="font-semibold">{c.newValue}</span>}
+                        {!isOpen && c.oldValue != null && <span className="text-mut line-through decoration-crit/60">{clip(c.oldValue)}</span>}
+                        {!isOpen && c.oldValue != null && c.newValue != null && <span className="text-[11px] text-mut">→</span>}
+                        {!isOpen && c.newValue != null && <span className="font-semibold">{clip(c.newValue)}</span>}
+                        {isOpen && <span className="text-[11px] text-mut italic">full diff below — removals struck, additions green</span>}
                         <span className={`rounded-full px-2 py-0.5 text-[8.5px] font-extrabold tracking-wider ${tone}`}>{label}</span>
                         {c.note && <span className="text-[11px] text-warn">⚠ {c.note}</span>}
                       </div>
+                      {isOpen && <div className="px-2 pb-2"><WordDiff oldText={c.oldValue ?? ""} newText={c.newValue ?? ""} /></div>}
                       {c.kind === "drift" && PULLABLE.has(c.field) && (
                         <div className="px-2 pb-1 text-[11px] text-ink2">
                           Shopkeep wins on push · escape hatch:{" "}
