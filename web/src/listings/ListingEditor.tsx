@@ -68,6 +68,20 @@ export function ListingEditor({
   const materials = useQuery({ queryKey: ["materials"], queryFn: inventoryApi.materials });
   const profiles = useQuery({ queryKey: ["packagingProfiles"], queryFn: listingsApi.profiles });
   const laborRate = useQuery({ queryKey: ["laborRate"], queryFn: catalogApi.laborRate });
+  const pDesigns = useQuery({
+    queryKey: ["designs", product.id],
+    queryFn: async () => {
+      const r = await fetch(`/api/v1/catalog/products/${product.id}/designs`);
+      return (await r.json()) as { id: number; name: string; overrideSets: { key: string }[] }[];
+    },
+  });
+  const pVariants = useQuery({
+    queryKey: ["variants", product.id],
+    queryFn: async () => {
+      const r = await fetch(`/api/v1/catalog/products/${product.id}/variants`);
+      return (await r.json()) as { id: number; name: string }[];
+    },
+  });
   const productConfigs = useQuery({
     queryKey: ["productConfigs", product.id],
     queryFn: () => catalogApi.configurations(product.id),
@@ -90,7 +104,7 @@ export function ListingEditor({
     },
   });
 
-  const mat = (id: number) => byId.get(id);
+  const mat = (id: number | null | undefined) => (id == null ? undefined : byId.get(id));
   const offeredCount = l.axes.map((a) => a.values.filter((v) => v.offered).length);
   const laborMinor = Math.round(((laborRate.data?.rateMinor ?? 0) * product.laborMinutes) / 60);
 
@@ -212,7 +226,16 @@ export function ListingEditor({
             >
               <option value="per_combination">per-combination (API)</option>
               <option value="per_primary">per-primary (legacy)</option>
+              <option value="listing_level">listing-level (design/variant axes)</option>
             </select>
+            {l.skuMode === "listing_level" && (
+              <input
+                value={l.listingSku ?? ""}
+                onChange={(e) => set({ listingSku: e.target.value || null })}
+                placeholder="listing SKU"
+                className="w-28 rounded border border-line bg-panel px-2 py-1 font-mono text-xs"
+              />
+            )}
           </label>
         </SectionTitle>
         {l.axes.map((axis, ai) => (
@@ -229,6 +252,35 @@ export function ListingEditor({
                 className="w-40 border-b border-dashed border-line bg-transparent font-semibold outline-none focus:border-accent"
               />
               <span className="text-xs text-mut">← {product.slots[axis.productSlotPosition]?.name}</span>
+              {/* value source (locked seam concept): materials | designs | variants | override sets */}
+              <select
+                value={axis.valueSource ?? "materials"}
+                onChange={(e) => {
+                  const src = e.target.value;
+                  const values =
+                    src === "designs"
+                      ? (pDesigns.data ?? []).map((d) => ({ materialId: null, offered: true, designId: d.id, displayLabel: d.name }))
+                      : src === "variants"
+                        ? (pVariants.data ?? []).map((d) => ({ materialId: null, offered: true, variantId: d.id, displayLabel: d.name }))
+                        : src === "override_sets"
+                          ? [
+                              { materialId: null, offered: true, overrideKey: "base", displayLabel: "Standard" },
+                              ...[...new Set((pDesigns.data ?? []).flatMap((d) => d.overrideSets.map((o) => o.key)))].map((k) => ({ materialId: null, offered: true, overrideKey: k, displayLabel: k })),
+                            ]
+                          : defaultInput(product, byId).axes[ai]?.values ?? [];
+                  set({
+                    axes: l.axes.map((a, j) => (j === ai ? { ...a, valueSource: src, values } : a)),
+                    ...(src !== "materials" ? { skuMode: "listing_level" as const } : {}),
+                  });
+                }}
+                className="ml-auto rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
+                title="where this axis's values come from"
+              >
+                <option value="materials">values: slot materials</option>
+                <option value="designs">values: designs (colorways)</option>
+                <option value="variants">values: variants (build styles)</option>
+                <option value="override_sets">values: design override sets</option>
+              </select>
             </div>
             <div className="mt-2 space-y-1">
               {axis.values.map((v, vi) => {
@@ -239,11 +291,22 @@ export function ListingEditor({
                       j === ai ? { ...a, values: a.values.map((x, k) => (k === vi ? { ...x, ...patch } : x)) } : a,
                     ),
                   });
+                const srcName = m?.name
+                  ?? (v.designId != null ? (pDesigns.data ?? []).find((d) => d.id === v.designId)?.name
+                  : v.variantId != null ? (pVariants.data ?? []).find((d) => d.id === v.variantId)?.name
+                  : v.overrideKey === "base" ? "base composition" : v.overrideKey) ?? "?";
                 return (
-                  <div key={v.materialId} className={`flex flex-wrap items-center gap-2.5 text-sm ${v.offered ? "" : "opacity-45"}`}>
+                  <div key={vi} className={`flex flex-wrap items-center gap-2.5 text-sm ${v.offered ? "" : "opacity-45"}`}>
                     <input type="checkbox" checked={v.offered} onChange={(e) => patchValue({ offered: e.target.checked })} className="h-4 w-4 accent-accent" />
                     <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: m ? (materialColor(m) ?? "var(--color-panel2)") : undefined }} />
-                    <span className="min-w-28">{m?.name ?? "?"}</span>
+                    <span className="min-w-28">{srcName}</span>
+                    <input
+                      value={v.displayLabel ?? ""}
+                      onChange={(e) => patchValue({ displayLabel: e.target.value || null })}
+                      placeholder={srcName}
+                      title="buyer-facing label — renaming never renames the design/material underneath"
+                      className="w-36 rounded border border-line bg-panel2 px-2 py-0.5 text-xs"
+                    />
                     {ai === 0 && l.skuMode === "per_primary" && (
                       <>
                         <input

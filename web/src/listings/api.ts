@@ -16,13 +16,17 @@ export type Personalization = {
 };
 
 export type AxisValue = {
-  materialId: number;
+  materialId: number | null;
   offered: boolean;
   platformSku?: string | null;
   priceOverrideMinor?: number | null;
+  designId?: number | null;
+  variantId?: number | null;
+  overrideKey?: string | null;
+  displayLabel?: string | null;
 };
 
-export type Axis = { displayName: string; productSlotPosition: number; values: AxisValue[] };
+export type Axis = { displayName: string; productSlotPosition: number; values: AxisValue[]; valueSource?: string };
 
 export type Extra = { materialId: number; quantity: number; basis: "per_order" | "per_unit" };
 
@@ -34,7 +38,8 @@ export type ListingInput = {
   basePriceMinor: number;
   currency: string;
   quantity: number;
-  skuMode: "per_combination" | "per_primary";
+  skuMode: "per_combination" | "per_primary" | "listing_level";
+  listingSku?: string | null;
   packagingProfileId: number | null;
   tags: string[];
   materialsList: string[];
