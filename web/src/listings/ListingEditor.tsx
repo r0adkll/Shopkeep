@@ -240,7 +240,7 @@ export function ListingEditor({
           </label>
         </SectionTitle>
         {l.axes.map((axis, ai) => (
-          <div key={ai} className="mt-2 rounded-xl border border-line bg-panel p-4 shadow-sm">
+          <div key={ai} className="relative mt-2 rounded-xl border border-line bg-panel p-4 pr-10 shadow-sm">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-[10px] font-extrabold tracking-widest text-accent">
                 {["PRIMARY", "SECONDARY", "TERTIARY"][ai] ?? `AXIS ${ai + 1}`}
@@ -287,9 +287,9 @@ export function ListingEditor({
                 type="button"
                 onClick={() => set({ axes: l.axes.filter((_, j) => j !== ai) })}
                 title="remove this axis"
-                className="rounded-md border border-line p-1 text-mut hover:border-crit hover:text-crit"
+                className="absolute top-3 right-3 rounded-md p-1 text-crit hover:bg-crit/10"
               >
-                <Trash2 size={13} />
+                <Trash2 size={14} />
               </button>
               {/* value source (locked seam concept): materials | designs | variants | override sets */}
               <select
