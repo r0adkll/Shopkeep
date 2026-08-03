@@ -450,8 +450,9 @@ export function ListingEditor({
                           className="w-36 rounded border border-line bg-panel2 px-2 py-0.5 font-mono text-xs"
                         />
                         <input
-                          value={v.priceOverrideMinor != null ? (v.priceOverrideMinor / 100).toFixed(2) : ""}
-                          onChange={(e) =>
+                          key={`p-${v.priceOverrideMinor ?? "none"}`}
+                          defaultValue={v.priceOverrideMinor != null ? (v.priceOverrideMinor / 100).toFixed(2) : ""}
+                          onBlur={(e) =>
                             patchValue({ priceOverrideMinor: e.target.value ? Math.round(parseFloat(e.target.value) * 100) : null })
                           }
                           placeholder={priceStr || "price"}
@@ -1033,8 +1034,9 @@ function PersonalizationEditor({
         <label className="flex items-center gap-2 text-xs text-ink2">
           Fee $
           <input
-            value={p.feeMinor != null ? (p.feeMinor / 100).toFixed(2) : ""}
-            onChange={(e) => onChange({ ...p, feeMinor: e.target.value ? Math.round(parseFloat(e.target.value) * 100) : null })}
+            key={`fee-${p.feeMinor ?? "none"}`}
+            defaultValue={p.feeMinor != null ? (p.feeMinor / 100).toFixed(2) : ""}
+            onBlur={(e) => onChange({ ...p, feeMinor: e.target.value ? Math.round(parseFloat(e.target.value) * 100) : null })}
             className="w-16 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
           />
         </label>
