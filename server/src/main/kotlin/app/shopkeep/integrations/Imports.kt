@@ -56,7 +56,8 @@ data class ImportValueMapping(
 @Serializable
 data class ImportAxisMapping(
     val name: String,
-    val slotPosition: Int? = null, // null = not material-bearing
+    val slotPosition: Int? = null, // set when mode=materials: which slot the values fill
+    val mode: String? = null, // materials | designs | variants | modifier (override matching / no materials)
     val values: List<ImportValueMapping> = emptyList(),
 )
 
@@ -107,7 +108,7 @@ class ImportRepository(
             p.propertyValues.forEach { pv -> axes.getOrPut(pv.propertyName) { mutableSetOf() }.addAll(pv.values) }
         }
         val mapping = ImportMapping(
-            axes = axes.map { (name, vals) -> ImportAxisMapping(name, null, vals.sorted().map { ImportValueMapping(it) }) },
+            axes = axes.map { (name, vals) -> ImportAxisMapping(name = name, values = vals.sorted().map { ImportValueMapping(it) }) },
         )
         val id = dbQuery {
             EtsyImportsTable.insert {

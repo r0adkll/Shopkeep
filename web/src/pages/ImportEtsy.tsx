@@ -20,7 +20,7 @@ type EtsyListing = {
   inventory: { products: { sku: string | null; property_values: { property_name: string; values: string[] }[]; offerings: { price: { amount: number; divisor: number } }[] }[] } | null;
 };
 type ValueMapping = { value: string; resolution: string; materialId: number | null; designId?: number | null; variantId?: number | null };
-type AxisMapping = { name: string; slotPosition: number | null; values: ValueMapping[] };
+type AxisMapping = { name: string; slotPosition: number | null; mode?: string | null; values: ValueMapping[] };
 type Mapping = { productId: number | null; axes: AxisMapping[] };
 type EtsyImport = { id: number; connectionId: number; etsyListingId: string; payload: EtsyListing; mapping: Mapping; listingId: number | null };
 type Connection = { id: number; platform: string; status: string; shopName: string | null };
@@ -217,6 +217,8 @@ function OverrideMatchCheck({ axisValues, designs }: { axisValues: string[]; des
   );
 }
 
+const axisMode = (a: AxisMapping) => a.mode ?? (a.slotPosition != null ? "materials" : "modifier");
+
 function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; products: ProductSummary[]; onBack: () => void }) {
   const { imp, materials, products, onBack } = props;
   const [mapping, setMapping] = useState<Mapping>(imp.mapping);
@@ -239,10 +241,10 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
   const [activated, setActivated] = useState<number | null>(null);
   const matById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
 
-  const resolvedCount = mapping.axes.filter((a) => a.slotPosition != null).flatMap((a) => a.values)
+  const resolvedCount = mapping.axes.filter((a) => axisMode(a) !== "modifier").flatMap((a) => a.values)
     .filter((v) => v.resolution !== "unmapped" && !(v.resolution === "material" && v.materialId == null)
       && !(v.resolution === "design" && v.designId == null) && !(v.resolution === "variant" && v.variantId == null)).length;
-  const totalCount = mapping.axes.filter((a) => a.slotPosition != null).flatMap((a) => a.values).length;
+  const totalCount = mapping.axes.filter((a) => axisMode(a) !== "modifier").flatMap((a) => a.values).length;
   const complete = mapping.productId != null && resolvedCount === totalCount && totalCount > 0;
 
   const save = useMutation({
@@ -281,7 +283,7 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
         How matching works: an <b className="text-ink">Etsy variation</b> → fills a <b className="text-ink">recipe slot</b> → each value picks <b className="text-ink">what goes in it</b> — a material, a design (colorway), or a variant (build style).
       </div>
       <div className="mb-3 rounded-xl border border-line bg-panel p-4 shadow-sm">
-        <div className="mb-2 text-[10px] font-extrabold tracking-widest text-mut uppercase">1 · Link to a Shopkeep product</div>
+        <div className="mb-2 text-[10px] font-extrabold tracking-widest text-mut uppercase">1 · Link a product, then say what each Etsy axis means</div>
         <div className="flex flex-wrap items-center gap-3">
           <select
             value={mapping.productId ?? ""}
@@ -302,20 +304,29 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
             <div key={ax.name} className="flex flex-wrap items-center gap-2 text-sm">
               <span className="w-40 flex-none text-ink2">{ax.name}</span>
               <select
-                value={ax.slotPosition ?? ""}
-                onChange={(e) => setAxis(i, (a) => ({ ...a, slotPosition: e.target.value === "" ? null : Number(e.target.value) }))}
+                value={ax.mode ?? (ax.slotPosition != null ? `slot:${ax.slotPosition}` : "modifier")}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAxis(i, (a) => ({
+                    ...a,
+                    mode: val.startsWith("slot:") ? "materials" : val,
+                    slotPosition: val.startsWith("slot:") ? Number(val.slice(5)) : null,
+                  }));
+                }}
                 className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs outline-none focus:border-accent"
               >
-                <option value="">doesn't affect materials — override sets match its values automatically</option>
+                <option value="designs">values are designs (colorways) of the product</option>
+                <option value="variants">values are variants (build styles) of the product</option>
                 {(productDetail.data?.slots ?? []).map((sl, si) =>
                   sl.kind === "CHOICE" ? (
-                    <option key={si} value={si}>
-                      fills → {sl.name} ({sl.quantity}{sl.optional ? ", optional" : ""})
+                    <option key={si} value={`slot:${si}`}>
+                      values are materials filling → {sl.name} ({sl.quantity}{sl.optional ? ", optional" : ""})
                     </option>
                   ) : null,
                 )}
+                <option value="modifier">no materials — matches design override sets (editions) or is cosmetic</option>
               </select>
-              {ax.slotPosition == null && (designs.data ?? []).some((d) => d.overrideSets.length > 0) && (
+              {axisMode(ax) === "modifier" && (designs.data ?? []).some((d) => d.overrideSets.length > 0) && (
                 <OverrideMatchCheck axisValues={ax.values.map((v) => v.value)} designs={designs.data!} />
               )}
             </div>
@@ -324,9 +335,9 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
       </div>
 
       <div className="mb-3 rounded-xl border border-line bg-panel p-4 shadow-sm">
-        <div className="mb-2 text-[10px] font-extrabold tracking-widest text-mut uppercase">2 · Map every value to a material</div>
+        <div className="mb-2 text-[10px] font-extrabold tracking-widest text-mut uppercase">2 · Resolve every value</div>
         <div className="grid gap-5 md:grid-cols-2">
-          {mapping.axes.filter((a) => a.slotPosition != null).map((ax) => {
+          {mapping.axes.filter((a) => axisMode(a) !== "modifier").map((ax) => {
             const i = mapping.axes.indexOf(ax);
             return (
               <div key={ax.name}>
@@ -344,6 +355,20 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
                       }
                       onChange={(e) => {
                         const val = e.target.value;
+                        if (val.startsWith("create:")) {
+                          const name = val.slice(7);
+                          (async () => {
+                            const cur = await jsonFetch<{ id: number; name: string }[]>(`/api/v1/catalog/products/${mapping.productId}/designs`);
+                            const saved = await jsonFetch<{ id: number; name: string }[]>(`/api/v1/catalog/products/${mapping.productId}/designs`, {
+                              method: "PUT", headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify([...cur, { id: null, name, assignments: [], overrideSets: [] }]),
+                            });
+                            const nd = saved.find((d) => d.name === name);
+                            if (nd) setAxis(i, (a) => ({ ...a, values: a.values.map((x, xi) => (xi === vi ? { ...x, resolution: "design", materialId: null, designId: nd.id, variantId: null } : x)) }));
+                            designs.refetch();
+                          })();
+                          return;
+                        }
                         setAxis(i, (a) => ({
                           ...a,
                           values: a.values.map((x, xi) => {
@@ -360,24 +385,29 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
                       }}
                       className={`min-w-0 flex-1 rounded border bg-panel px-1.5 py-0.5 text-xs outline-none ${v.resolution === "unmapped" ? "border-warn" : "border-line"}`}
                     >
-                      <option value="unmapped">— pick a material…</option>
-                      <option value="review">review per order</option>
+                      {axisMode(ax) === "designs" && (
+                        <>
+                          <option value="unmapped">— pick a design…</option>
+                          {(designs.data ?? []).map((d) => <option key={`d${d.id}`} value={`d:${d.id}`}>🎨 {d.name}</option>)}
+                          <option value={`create:${v.value}`}>+ create design “{v.value}” on this product…</option>
+                        </>
+                      )}
+                      {axisMode(ax) === "variants" && (
+                        <>
+                          <option value="unmapped">— pick a variant…</option>
+                          {(variants.data ?? []).map((d) => <option key={`v${d.id}`} value={`v:${d.id}`}>{d.name}</option>)}
+                        </>
+                      )}
+                      {axisMode(ax) === "materials" && (
+                        <>
+                          <option value="unmapped">— pick a material…</option>
+                          {materials.filter((m) => !m.archived).map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </>
+                      )}
+                      <option value="review">review per order (human picks at build time)</option>
                       <option value="ignore">no material impact</option>
-                      {(designs.data ?? []).length > 0 && (
-                        <optgroup label="Designs (colorways)">
-                          {designs.data!.map((d) => <option key={`d${d.id}`} value={`d:${d.id}`}>{d.name}</option>)}
-                        </optgroup>
-                      )}
-                      {(variants.data ?? []).length > 0 && (
-                        <optgroup label="Variants (build styles)">
-                          {variants.data!.map((d) => <option key={`v${d.id}`} value={`v:${d.id}`}>{d.name}</option>)}
-                        </optgroup>
-                      )}
-                      <optgroup label="Materials">
-                      {materials.filter((m) => !m.archived).map((m) => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                      ))}
-                      </optgroup>
                     </select>
                     <span
                       className="h-2.5 w-2.5 flex-none rounded-full border border-line"
