@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Trash2 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { type Material, inventoryApi } from "../inventory/api";
 import { type ProductSummary, catalogApi } from "../catalog/api";
@@ -154,13 +154,27 @@ export function ImportEtsyPage() {
                 {existing?.listingId != null ? (
                   <span className="rounded-full bg-good/10 px-2.5 py-1 text-[10px] font-extrabold tracking-wider text-good">IMPORTED ✓</span>
                 ) : (
-                  <button
-                    onClick={() => startImport.mutate(l.listing_id)}
-                    disabled={startImport.isPending}
-                    className="rounded-lg bg-accent px-4 py-1.5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50"
-                  >
-                    {existing ? "Resume mapping…" : "Import"}
-                  </button>
+                  <span className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => startImport.mutate(l.listing_id)}
+                      disabled={startImport.isPending}
+                      className="rounded-lg bg-accent px-4 py-1.5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      {existing ? "Resume mapping…" : "Import"}
+                    </button>
+                    {existing && (
+                      <button
+                        onClick={async () => {
+                          await fetch(`/api/v1/integrations/imports/${existing.id}`, { method: "DELETE" });
+                          qc.invalidateQueries({ queryKey: ["imports"] });
+                        }}
+                        title="abandon this mapping draft — the Etsy listing is untouched; you can re-import anytime"
+                        className="rounded-md border border-crit/40 p-1.5 text-crit hover:border-crit hover:bg-crit/10"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </span>
                 )}
               </div>
             );

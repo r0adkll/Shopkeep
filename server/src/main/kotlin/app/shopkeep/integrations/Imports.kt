@@ -15,6 +15,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
@@ -22,6 +23,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.json.jsonb
 import org.jetbrains.exposed.sql.selectAll
@@ -118,6 +120,15 @@ class ImportRepository(
         return EtsyImport(id, connectionId, etsyListingId.toString(), listing, mapping, null)
     }
 
+    /** Abandon a draft. Activated imports stay — they're provenance for a live listing. */
+    suspend fun delete(id: Long): String? = dbQuery {
+        val row = EtsyImportsTable.selectAll().where { EtsyImportsTable.id eq id }.singleOrNull()
+            ?: return@dbQuery "Import not found."
+        if (row[EtsyImportsTable.listingId] != null) return@dbQuery "Already activated — the listing owns this import now."
+        EtsyImportsTable.deleteWhere { EtsyImportsTable.id eq id }
+        null
+    }
+
     suspend fun saveMapping(id: Long, mapping: ImportMapping): Boolean = dbQuery {
         EtsyImportsTable.update({ EtsyImportsTable.id eq id }) { it[EtsyImportsTable.mapping] = mapping } > 0
     }
@@ -207,6 +218,12 @@ fun Route.importRoutes(imports: ImportRepository, connections: ConnectionReposit
             if (imp == null) call.respond(HttpStatusCode.NotFound, ApiError("Etsy listing not found."))
             else call.respond(HttpStatusCode.Created, imp)
         }
+        delete("/integrations/imports/{id}") {
+            val err = call.parameters["id"]?.toLongOrNull()?.let { imports.delete(it) } ?: "Import not found."
+            if (err == null) call.respond(HttpStatusCode.NoContent)
+            else call.respond(HttpStatusCode.UnprocessableEntity, ApiError(err))
+        }
+
         put("/integrations/imports/{id}/mapping") {
             val id = call.parameters["id"]?.toLongOrNull()
             val mapping = call.receive<ImportMapping>()
