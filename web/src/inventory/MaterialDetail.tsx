@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatCost, formatQty, inventoryApi, materialColor, type TxnKind } from "./api";
+import { X } from "lucide-react";
 import { MaterialIcon } from "./MaterialIcon";
 import { Button, ErrorText, Field } from "../ui";
 
@@ -46,18 +47,27 @@ export function MaterialDetailDrawer({
         className="h-full w-full max-w-xl overflow-y-auto border-l border-line bg-panel p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-5 flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-panel2">
-            <MaterialIcon category={m.category} type={m.type} size={20} style={{ color: color ?? "var(--color-ink2)" }} />
+        <div className="mb-5 flex items-start gap-3.5">
+          <span
+            className="flex h-11 w-11 flex-none items-center justify-center rounded-xl border border-line"
+            style={{ background: color ? `color-mix(in srgb, ${color} 14%, transparent)` : "var(--color-panel2)" }}
+          >
+            <MaterialIcon category={m.category} type={m.type} size={22} style={{ color: color ?? "var(--color-ink2)" }} />
           </span>
-          <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold">{m.name}</h2>
-            {m.brand && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-accent uppercase">{m.brand}</span>}
-            <p className="text-xs text-mut">
-              {m.category} · {m.type} · {formatCost(m)}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h2 className="min-w-0 truncate text-lg leading-tight font-semibold">{m.name}</h2>
+              {m.brand && (
+                <span className="flex-none rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-accent uppercase">
+                  {m.brand}
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-mut">
+              <span className="capitalize">{m.category}</span> · {m.type} · {formatCost(m)}
             </p>
           </div>
-          <div className="ml-auto flex gap-2">
+          <div className="flex flex-none items-center gap-2">
             {m.vendorUrl && (
               <a
                 href={m.vendorUrl}
@@ -69,11 +79,11 @@ export function MaterialDetailDrawer({
                 Order ↗
               </a>
             )}
-            <button type="button" onClick={onEdit} className="rounded-md border border-line px-3 py-1.5 text-sm text-ink2 hover:text-ink">
+            <button type="button" onClick={onEdit} className="rounded-md border border-line px-3 py-1.5 text-sm text-ink2 hover:border-accent hover:text-ink">
               Edit
             </button>
-            <button type="button" onClick={onClose} className="rounded-md border border-line px-3 py-1.5 text-sm text-ink2 hover:text-ink">
-              Close
+            <button type="button" onClick={onClose} title="close" className="rounded-md p-1.5 text-mut hover:bg-panel2 hover:text-ink">
+              <X size={16} />
             </button>
           </div>
         </div>
