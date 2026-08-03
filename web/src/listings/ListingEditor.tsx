@@ -432,13 +432,13 @@ export function ListingEditor({
                   <div key={vi} className={`flex flex-wrap items-center gap-2.5 text-sm ${v.offered ? "" : "opacity-45"}`}>
                     <input type="checkbox" checked={v.offered} onChange={(e) => patchValue({ offered: e.target.checked })} className="h-4 w-4 accent-accent" />
                     <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: m ? (materialColor(m) ?? "var(--color-panel2)") : undefined }} />
-                    <span className="min-w-28">{srcName}</span>
+                    <span className="w-40 flex-none truncate" title={srcName}>{srcName}</span>
                     <input
                       value={v.displayLabel ?? ""}
                       onChange={(e) => patchValue({ displayLabel: e.target.value || null })}
                       placeholder={srcName}
                       title="buyer-facing label — renaming never renames the design/material underneath"
-                      className="w-36 rounded border border-line bg-panel2 px-2 py-0.5 text-xs"
+                      className="w-36 flex-none rounded border border-line bg-panel2 px-2 py-0.5 text-xs"
                     />
                     {ai === 0 && l.skuMode === "per_primary" && (
                       <>
@@ -446,7 +446,7 @@ export function ListingEditor({
                           value={v.platformSku ?? ""}
                           onChange={(e) => patchValue({ platformSku: e.target.value || null })}
                           placeholder="Etsy SKU"
-                          className="w-36 rounded border border-line bg-panel2 px-2 py-0.5 font-mono text-xs"
+                          className="w-36 flex-none rounded border border-line bg-panel2 px-2 py-0.5 font-mono text-xs"
                         />
                         <input
                           key={`p-${v.priceOverrideMinor ?? "none"}`}
@@ -455,7 +455,7 @@ export function ListingEditor({
                             patchValue({ priceOverrideMinor: e.target.value ? Math.round(parseFloat(e.target.value) * 100) : null })
                           }
                           placeholder={priceStr || "price"}
-                          className="w-20 rounded border border-line bg-panel2 px-2 py-0.5 text-right font-mono text-xs"
+                          className="w-20 flex-none rounded border border-line bg-panel2 px-2 py-0.5 text-right font-mono text-xs"
                         />
                       </>
                     )}
