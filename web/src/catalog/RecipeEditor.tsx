@@ -41,7 +41,6 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
   const [p, setP] = useState<ProductInput>(existing ?? EMPTY);
   const [tab, setTab] = useState<"recipe" | "designs" | "variants">("recipe");
   const [composer, setComposer] = useState<{ index: number | null; rule: Rule } | null>(null);
-  const [mapper, setMapper] = useState<{ source: number; target: number } | null>(null);
 
   const byId = useMemo(() => new Map((materials.data ?? []).map((m) => [m.id, m])), [materials.data]);
   // Products don't own SKUs (listings do, D17) — no enumeration here. The
@@ -247,7 +246,7 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                         <span className="font-mono text-xs text-ink2">{ids.length}/{total} mapped</span>
                         {ids.length < total && <span className="text-[11px] text-mut">rest fall through to default</span>}
                         <span className="ml-auto flex gap-1.5">
-                          <button type="button" onClick={() => setMapper({ source: w, target: t })}
+                          <button type="button" onClick={() => setComposer({ index: null, rule: { whenSlot: w, thenSlot: t, thenMaterialId: p.slots[t]?.optionMaterialIds[0] ?? 0, whenMaterialIds: [] } })}
                             className="rounded border border-line px-2 py-0.5 text-xs text-ink2 hover:text-ink">edit map…</button>
                           <button type="button" onClick={() => set({ rules: p.rules.filter((_, j) => !ids.includes(j)) })}
                             title="remove the whole map"
@@ -306,26 +305,6 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                 </select>
               </div>
             ))}
-
-            {mapper && (
-              <ColorMapper
-                p={p}
-                byId={byId}
-                sourceIdx={mapper.source}
-                targetIdx={mapper.target}
-                onPair={(source, target) => setMapper({ source, target })}
-                choiceSlots={choiceSlots}
-                ruleSlots={ruleSlots}
-                onSave={(compiled) => {
-                  const keep = p.rules.filter(
-                    (r) => !(r.whenMaterialIds.length === 1 && r.whenSlot === mapper.source && r.thenSlot === mapper.target),
-                  );
-                  set({ rules: [...keep, ...compiled] });
-                  setMapper(null);
-                }}
-                onCancel={() => setMapper(null)}
-              />
-            )}
             {composer ? (
               <RuleComposer
                 p={p}
@@ -333,6 +312,13 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                 choiceSlots={choiceSlots}
                 ruleSlots={ruleSlots}
                 state={composer}
+                onSaveMany={(whenSlot, thenSlot, compiled) => {
+                  const keep = p.rules.filter(
+                    (r) => !(r.whenMaterialIds.length === 1 && r.whenSlot === whenSlot && r.thenSlot === thenSlot),
+                  );
+                  set({ rules: [...keep, ...compiled] });
+                  setComposer(null);
+                }}
                 onSave={(rule) => {
                   set({
                     rules:
@@ -359,16 +345,6 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                   + Add rule
                 </button>
               )
-            )}
-            {!composer && !mapper && choiceSlots.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setMapper({ source: choiceSlots[0].i, target: ruleSlots[0].i })}
-                className="mt-2 w-full rounded-lg border border-dashed border-line py-2 text-sm text-accent hover:border-accent"
-                title="align each source color to a target material — compiles to one rule per color"
-              >
-                🎨 Map colors…
-              </button>
             )}
           </>
         )}
@@ -668,6 +644,7 @@ function RuleComposer({
   ruleSlots,
   state,
   onSave,
+  onSaveMany,
   onCancel,
 }: {
   p: ProductInput;
@@ -676,9 +653,18 @@ function RuleComposer({
   ruleSlots: { s: Slot; i: number }[];
   state: { index: number | null; rule: Rule };
   onSave: (r: Rule) => void;
+  onSaveMany: (whenSlot: number, thenSlot: number, rules: Rule[]) => void;
   onCancel: () => void;
 }) {
   const [r, setR] = useState<Rule>(state.rule);
+  // Slots are single-category by construction: derive each side's category
+  // from its palette. Filament -> filament flips the composer into the
+  // color-map grid automatically — no separate feature to discover.
+  const slotCategory = (idx: number) => {
+    const sl = p.slots[idx];
+    return byId.get(sl?.optionMaterialIds[0] ?? sl?.fixedMaterialId ?? -1)?.category ?? null;
+  };
+  const colorMode = slotCategory(r.whenSlot) === "filament" && slotCategory(r.thenSlot) === "filament";
   const [q, setQ] = useState("");
   const [sortK, setSortK] = useState<SortKey>("color");
   const whenSlot = p.slots[r.whenSlot];
@@ -702,7 +688,20 @@ function RuleComposer({
             </option>
           ))}
         </select>
+        {colorMode ? (
+          <>
+            <span className="text-mut">each color sets</span>
+            <select value={r.thenSlot} onChange={(e) => setR({ ...r, thenSlot: +e.target.value })} className="rounded-md border border-line bg-panel2 px-2 py-1">
+              {ruleSlots.map(({ s, i }) => (
+                <option key={i} value={i}>{s.name || `slot ${i + 1}`}</option>
+              ))}
+            </select>
+            <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-accent">COLOR → COLOR</span>
+          </>
+        ) : (
         <span className="text-mut">is any of</span>
+        )}
+        {!colorMode && (
         <span className="ml-auto flex items-center gap-2 text-[11px] text-mut">
           <input
             value={q}
@@ -746,7 +745,20 @@ function RuleComposer({
             );
           })()}
         </span>
+        )}
       </div>
+      {colorMode ? (
+        <MapGrid
+          key={`${r.whenSlot}:${r.thenSlot}`}
+          p={p}
+          byId={byId}
+          sourceIdx={r.whenSlot}
+          targetIdx={r.thenSlot}
+          onSave={(rules) => onSaveMany(r.whenSlot, r.thenSlot, rules)}
+          onCancel={onCancel}
+        />
+      ) : (
+      <>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {sortMaterials(
           (whenSlot?.optionMaterialIds ?? []).map((id) => byId.get(id)).filter((m): m is Material => !!m && matchesQuery(m, q)),
@@ -806,24 +818,25 @@ function RuleComposer({
           Cancel
         </button>
       </div>
+      </>
+      )}
     </div>
   );
 }
 
 
-/** Color-to-color aligner (the import matcher's grammar applied to rules):
- *  one row per source-slot option, auto-suggested by name tokens then hue
- *  distance; saves as one single-option rule per mapped color. */
-function ColorMapper({
-  p, byId, sourceIdx, targetIdx, choiceSlots, ruleSlots, onPair, onSave, onCancel,
+/** Color-to-color grid used INSIDE the rule composer when both slots are
+ *  filament (slots are single-category, so this is detectable). One row per
+ *  source color, auto-suggested by name tokens then hex distance; saves as
+ *  one single-option rule per mapped color. Keyed by pair upstream so
+ *  switching slots resets rows. */
+function MapGrid({
+  p, byId, sourceIdx, targetIdx, onSave, onCancel,
 }: {
   p: ProductInput;
   byId: Map<number, Material>;
   sourceIdx: number;
   targetIdx: number;
-  choiceSlots: { s: Slot; i: number }[];
-  ruleSlots: { s: Slot; i: number }[];
-  onPair: (source: number, target: number) => void;
   onSave: (rules: Rule[]) => void;
   onCancel: () => void;
 }) {
@@ -877,27 +890,9 @@ function ColorMapper({
   });
 
   const mapped = [...map.values()].filter((v) => v != null).length;
-  const save = () => {
-    const rules: Rule[] = [];
-    for (const [srcId, tgtId] of map) {
-      if (tgtId != null) rules.push({ whenSlot: sourceIdx, whenMaterialIds: [srcId], thenSlot: targetIdx, thenMaterialId: tgtId });
-    }
-    onSave(rules);
-  };
 
   return (
-    <div className="mt-2 rounded-xl border-2 border-accent bg-panel p-4 shadow-sm">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-[10px] font-extrabold tracking-widest text-accent">COLOR MAP</span>
-        <select value={sourceIdx} onChange={(e) => onPair(+e.target.value, targetIdx)} className="rounded-md border border-line bg-panel2 px-2 py-1">
-          {choiceSlots.map(({ s, i }) => <option key={i} value={i}>{s.name || `slot ${i + 1}`}</option>)}
-        </select>
-        <span className="text-mut">each color sets</span>
-        <select value={targetIdx} onChange={(e) => onPair(sourceIdx, +e.target.value)} className="rounded-md border border-line bg-panel2 px-2 py-1">
-          {ruleSlots.map(({ s, i }) => <option key={i} value={i}>{s.name || `slot ${i + 1}`}</option>)}
-        </select>
-        <span className="ml-auto font-mono text-xs text-ink2">{mapped}/{map.size} mapped</span>
-      </div>
+    <>
       <div className="mt-2 max-h-80 overflow-y-auto">
         {[...map.entries()].map(([srcId, tgtId]) => {
           const sm = byId.get(srcId);
@@ -923,14 +918,24 @@ function ColorMapper({
         })}
       </div>
       <div className="mt-3 flex gap-2">
-        <button type="button" onClick={save} className="rounded-md bg-accent px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+        <button
+          type="button"
+          onClick={() => {
+            const rules: Rule[] = [];
+            for (const [srcId, tgtId] of map) {
+              if (tgtId != null) rules.push({ whenSlot: sourceIdx, whenMaterialIds: [srcId], thenSlot: targetIdx, thenMaterialId: tgtId });
+            }
+            onSave(rules);
+          }}
+          className="rounded-md bg-accent px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90"
+        >
           Save map ({mapped} rules)
         </button>
         <button type="button" onClick={onCancel} className="rounded-md border border-line px-4 py-1.5 text-sm text-ink2 hover:text-ink">
           Cancel
         </button>
-        <span className="ml-auto self-center text-[11px] text-mut">compiles to one rule per color — hand-written rules above still win first</span>
+        <span className="ml-auto self-center text-[11px] text-mut">{mapped}/{map.size} mapped — the rest use the slot default</span>
       </div>
-    </div>
+    </>
   );
 }
