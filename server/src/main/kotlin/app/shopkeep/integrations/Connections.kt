@@ -8,6 +8,7 @@ import dev.zacsweers.metro.SingleIn
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.forms.submitForm
+import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.get
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
@@ -107,6 +108,9 @@ data class EtsyInventoryProduct(
 data class EtsyInventory(val products: List<EtsyInventoryProduct> = emptyList())
 
 @Serializable
+data class EtsyListingImage(@SerialName("listing_image_id") val listingImageId: Long = 0)
+
+@Serializable
 data class EtsyShopListing(
     @SerialName("listing_id") val listingId: Long = 0,
     val title: String = "",
@@ -115,6 +119,7 @@ data class EtsyShopListing(
     val quantity: Int = 0,
     val tags: List<String> = emptyList(),
     val inventory: EtsyInventory? = null,
+    val images: List<EtsyListingImage>? = null,
 )
 
 @Serializable
@@ -477,7 +482,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
     suspend fun fetchListing(connectionId: Long, etsyListingId: String): EtsyShopListing? {
         val c = creds(connectionId) ?: return null
         return runCatching {
-            val listing = etsyGet<EtsyShopListing>("$apiBase/listings/$etsyListingId", c.keystring, c.secret, c.access)
+            val listing = etsyGet<EtsyShopListing>("$apiBase/listings/$etsyListingId?includes=Images", c.keystring, c.secret, c.access)
             val inv = runCatching {
                 etsyGet<EtsyInventory>("$apiBase/listings/$etsyListingId/inventory", c.keystring, c.secret, c.access)
             }.getOrNull()
@@ -499,6 +504,30 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         }
         return if (resp.status.isSuccess()) null
         else "Etsy ${resp.status.value} on $path: ${resp.bodyAsText().take(300)}"
+    }
+
+    /** Multipart image upload (uploadListingImage). Returns error text or null. */
+    suspend fun etsyUploadImage(connectionId: Long, etsyListingId: String, bytes: ByteArray, filename: String): String? {
+        val c = creds(connectionId) ?: return "Connection not available."
+        val resp = http.submitFormWithBinaryData(
+            url = "$apiBase/shops/${c.shopId}/listings/$etsyListingId/images",
+            formData = io.ktor.client.request.forms.formData {
+                append(
+                    "image", bytes,
+                    io.ktor.http.Headers.build {
+                        append(HttpHeaders.ContentType, "image/jpeg")
+                        append(HttpHeaders.ContentDisposition, "filename=\"$filename\"")
+                    },
+                )
+            },
+        ) {
+            headers {
+                append("x-api-key", if (c.secret.isBlank()) c.keystring else "${c.keystring}:${c.secret}")
+                append(HttpHeaders.Authorization, "Bearer ${c.access}")
+            }
+        }
+        return if (resp.status.isSuccess()) null
+        else "Etsy ${resp.status.value} uploading $filename: ${resp.bodyAsText().take(300)}"
     }
 
     /** updateListing is form-encoded; values from a flat JSON object. */

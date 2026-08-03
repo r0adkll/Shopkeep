@@ -41,6 +41,7 @@ data class PushSnapshot(
     val quantity: Int = 0,
     val state: String = "",
     val variations: Map<String, List<String>> = emptyMap(),
+    val photoDocumentIds: List<Long> = emptyList(), // local photos already uploaded
 )
 
 @Serializable
@@ -79,6 +80,7 @@ private const val CUSTOM_PROP_2 = 514L
 class PushService(
     private val connections: ConnectionRepository,
     private val listings: ListingRepository,
+    private val documents: app.shopkeep.documents.DocumentRepository,
 ) {
     private suspend fun connectionId(): Long? = connections.connectedIds().firstOrNull()
 
@@ -181,6 +183,19 @@ class PushService(
             changes += PushChange("variations", it, "axis on Etsy", null, "removed", "whole axis removed")
         }
 
+        // Photos: additive-only (locked concept). New = local photos not yet
+        // recorded as uploaded in the snapshot.
+        val uploaded = baseline?.photoDocumentIds ?: emptyList()
+        val newPhotos = l.input.imageDocumentIds.filter { it !in uploaded }
+        if (newPhotos.isNotEmpty()) {
+            val etsyCount = current.images?.size ?: 0
+            val over = etsyCount + newPhotos.size > 20
+            changes += PushChange(
+                "photos", "Photos", "$etsyCount on Etsy", "+${newPhotos.size} to upload", "added",
+                if (over) "would exceed Etsy's 20-photo cap" else null,
+            )
+        }
+
         val comboCount = want.variations.values.fold(1) { a, v -> a * maxOf(v.size, 1) }
         val renewal = have.state == "sold_out" && want.quantity > 0 && want.state == "active"
         val blocked = if (comboCount > 400) "Over Etsy's 400-combination cap ($comboCount)." else null
@@ -264,7 +279,21 @@ class PushService(
             return fail(listingId, "details: $it")
         }
 
-        // 3) state last (renewal takes the fresh quantities)
+        // 3) photos: additive-only uploads for local photos not yet on Etsy
+        val previouslyUploaded = dbQuery {
+            ListingsTable.selectAll().where { ListingsTable.id eq listingId }.singleOrNull()
+                ?.get(ListingsTable.pushedSnapshot)?.photoDocumentIds
+        } ?: emptyList()
+        val uploadedNow = mutableListOf<Long>()
+        for (docId in l.input.imageDocumentIds.filter { it !in previouslyUploaded }) {
+            val doc = documents.get(docId) ?: continue
+            connections.etsyUploadImage(connId, etsyId, doc.third, "shopkeep-$docId.jpg")?.let {
+                return fail(listingId, "photos: $it (uploaded ${uploadedNow.size} before failing)")
+            }
+            uploadedNow += docId
+        }
+
+        // 4) state last (renewal takes the fresh quantities)
         val currentState = connections.fetchListing(connId, etsyId)?.state
         if (currentState != null && currentState != want.state && want.state in setOf("active", "draft", "inactive")) {
             val stateBody = buildJsonObject { put("state", want.state) }
@@ -275,7 +304,7 @@ class PushService(
 
         dbQuery {
             ListingsTable.update({ ListingsTable.id eq listingId }) {
-                it[pushedSnapshot] = want
+                it[pushedSnapshot] = want.copy(photoDocumentIds = (previouslyUploaded + uploadedNow).distinct())
                 it[syncState] = "in_sync"
                 it[lastPushedAt] = OffsetDateTime.now()
                 it[lastPushError] = null

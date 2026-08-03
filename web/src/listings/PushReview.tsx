@@ -89,7 +89,7 @@ export function PushReview({ listingId, onClose, onPushed }: { listingId: number
     else setError(j?.error ?? "Push failed.");
   };
 
-  const sections = ["details", "variations"];
+  const sections = ["details", "variations", "photos"];
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
