@@ -1,3 +1,4 @@
+import { Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DesignsTab, VariantsTab } from "./DesignsEditor";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -425,8 +426,8 @@ function ImagePicker({
         />
       </label>
       {imageDocumentId && (
-        <button type="button" onClick={() => onChange(null)} className="text-[10px] text-mut hover:text-crit">
-          remove
+        <button type="button" onClick={() => onChange(null)} title="remove image" className="rounded-md border border-crit/40 p-1 text-crit hover:border-crit hover:bg-crit/10">
+          <Trash2 size={12} />
         </button>
       )}
     </div>
@@ -497,8 +498,13 @@ function SlotCard({
           <QtyInput value={slot.quantity} onCommit={(quantity) => onChange({ quantity })} />
           {unit ?? "unit"} / unit
         </label>
-        <button type="button" onClick={onRemove} className="text-xs text-mut opacity-0 transition-opacity group-hover:opacity-100 hover:text-crit">
-          remove
+        <button
+          type="button"
+          onClick={onRemove}
+          title="remove slot"
+          className="rounded-md border border-crit/40 p-1 text-crit opacity-0 transition-opacity group-hover:opacity-100 hover:border-crit hover:bg-crit/10"
+        >
+          <Trash2 size={13} />
         </button>
       </div>
 
