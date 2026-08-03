@@ -14,7 +14,7 @@ import {
 import { MaterialIcon } from "../inventory/MaterialIcon";
 import { MaterialPicker } from "../inventory/MaterialPicker";
 import { Button, ErrorText, Field } from "../ui";
-import { catalogApi, documentUrl, enumerate, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
+import { catalogApi, documentUrl, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
 
 /** The recipe builder, built to the locked concept (vault: Products.md):
  *  slots define the possibility space, sentence rules resolve dependent
@@ -42,8 +42,35 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
   const [composer, setComposer] = useState<{ index: number | null; rule: Rule } | null>(null);
 
   const byId = useMemo(() => new Map((materials.data ?? []).map((m) => [m.id, m])), [materials.data]);
-  const configs = useMemo(() => enumerate(p, byId), [p, byId]);
-  const unresolved = configs.filter((c) => !c.resolved).length;
+  // Products don't own SKUs (listings do, D17) — no enumeration here. The
+  // count is arithmetic over choice palettes; coverage checks rules/defaults.
+  const comboCount = useMemo(() => {
+    const choice = p.slots.filter((s) => s.kind === "CHOICE");
+    if (choice.length === 0) return 0;
+    return choice.reduce((n, s) => n * s.optionMaterialIds.length, 1);
+  }, [p.slots]);
+  const coverageWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    p.slots.forEach((slot, idx) => {
+      if (slot.kind !== "RULE" || slot.defaultMaterialId != null) return;
+      const rules = p.rules.filter((r) => r.thenSlot === idx);
+      if (rules.length === 0) {
+        warnings.push(`${slot.name || `slot ${idx + 1}`}: no rules and no default`);
+        return;
+      }
+      const byWhen = new Map<number, Set<number>>();
+      rules.forEach((r) => {
+        const set = byWhen.get(r.whenSlot) ?? new Set<number>();
+        r.whenMaterialIds.forEach((m) => set.add(m));
+        byWhen.set(r.whenSlot, set);
+      });
+      const fullyCovered = [...byWhen.entries()].some(([w, covered]) =>
+        (p.slots[w]?.optionMaterialIds ?? []).every((m) => covered.has(m)),
+      );
+      if (!fullyCovered) warnings.push(`${slot.name || `slot ${idx + 1}`}: some options fall through — add a rule or default`);
+    });
+    return warnings;
+  }, [p.slots, p.rules]);
 
   const set = (patch: Partial<ProductInput>) => setP((prev) => ({ ...prev, ...patch }));
   const setSlot = (i: number, patch: Partial<Slot>) =>
@@ -276,63 +303,6 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
             )}
           </>
         )}
-
-        {/* live configuration preview */}
-        {configs.length > 0 && (
-          <>
-            <h2 className="mt-6 mb-1 text-[13px] font-bold tracking-widest uppercase text-ink2">
-              Generated configurations{" "}
-              <span className="font-mono font-normal tracking-normal text-mut">{configs.length}</span>
-            </h2>
-            <div className="overflow-x-auto rounded-xl border border-line bg-panel shadow-sm">
-              <table className="w-full min-w-[560px] border-collapse text-[13px]">
-                <thead>
-                  <tr className="text-left text-[10px] tracking-widest text-mut uppercase">
-                    {configs[0]?.selections.map((s) => (
-                      <th key={s.slotName} className="border-b border-line px-3 py-2">{s.slotName}</th>
-                    ))}
-                    <th className="border-b border-line px-3 py-2">SKU</th>
-                    <th className="border-b border-line px-3 py-2">BOM</th>
-                    <th className="border-b border-line px-3 py-2">Buildable</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {configs.map((c, i) => (
-                    <tr key={i} className={c.resolved ? "" : "bg-warn/10"}>
-                      {c.selections.map((s) => (
-                        <td key={s.slotName} className="border-b border-line/40 px-3 py-1.5 text-ink2">
-                          <span
-                            className="mr-1.5 inline-block h-3 w-3 rounded-full border border-line align-[-1px]"
-                            style={{ background: materialColor(s.material) ?? "var(--color-panel2)" }}
-                          />
-                          {s.material.name}
-                        </td>
-                      ))}
-                      {c.resolved ? (
-                        <>
-                          <td className="border-b border-line/40 px-3 py-1.5 font-mono font-semibold">{c.sku}</td>
-                          <td className="border-b border-line/40 px-3 py-1.5 font-mono">{money(c.materialCostMinor)}</td>
-                          <td
-                            className={`border-b border-line/40 px-3 py-1.5 font-mono font-bold ${
-                              (c.buildableUnits ?? 0) < 3 ? "text-crit" : (c.buildableUnits ?? 0) < 8 ? "text-warn" : "text-good"
-                            }`}
-                            title={c.cappedBy ? `limited by ${c.cappedBy}` : undefined}
-                          >
-                            {c.buildableUnits}
-                          </td>
-                        </>
-                      ) : (
-                        <td colSpan={3} className="border-b border-line/40 px-3 py-1.5 text-xs font-bold text-warn">
-                          NO RULE — cannot become a SKU
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
         </div>
       </div>
 
@@ -340,10 +310,11 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
       <div className="flex flex-col gap-3 lg:sticky lg:top-4 lg:self-start">
         <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
           <div className="text-[10.5px] tracking-widest uppercase text-mut">Configurations</div>
-          <div className="font-mono text-2xl font-semibold">{configs.filter((c) => c.resolved).length}</div>
-          {unresolved > 0 && (
-            <div className="mt-1 text-xs font-semibold text-warn">▲ {unresolved} unresolved — add a rule or default</div>
-          )}
+          <div className="font-mono text-2xl font-semibold">{comboCount.toLocaleString()}</div>
+          <div className="mt-0.5 text-[11px] text-mut">choice combinations — SKUs are the listing's job</div>
+          {coverageWarnings.map((w) => (
+            <div key={w} className="mt-1 text-xs font-semibold text-warn">▲ {w}</div>
+          ))}
         </div>
         <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
           <div className="text-[10.5px] tracking-widest uppercase text-mut">Unit cost</div>
