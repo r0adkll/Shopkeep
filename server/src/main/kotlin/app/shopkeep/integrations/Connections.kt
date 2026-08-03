@@ -213,6 +213,8 @@ data class Connection(
     val status: String,
     val lastVerifiedAt: String?,
     val errorMessage: String?,
+    val lastSyncedAt: String?,
+    val orderCount: Long,
     val capabilities: PlatformCapabilities,
 )
 
@@ -477,7 +479,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         ConnectionsTable.update({ ConnectionsTable.id eq connectionId }) { it[syncCursor] = at }
     }
 
-    private fun org.jetbrains.exposed.sql.ResultRow.toConnection() = Connection(
+    private fun org.jetbrains.exposed.sql.ResultRow.toConnection(): Connection = Connection(
         id = this[ConnectionsTable.id],
         platform = this[ConnectionsTable.platform],
         label = this[ConnectionsTable.label],
@@ -487,6 +489,8 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         status = this[ConnectionsTable.status],
         lastVerifiedAt = this[ConnectionsTable.lastVerifiedAt]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
         errorMessage = this[ConnectionsTable.errorMessage],
+        lastSyncedAt = this[ConnectionsTable.syncCursor]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+        orderCount = OrdersTable.selectAll().where { OrdersTable.connectionId eq this@toConnection[ConnectionsTable.id] }.count(),
         capabilities = ETSY_CAPABILITIES,
     )
 }

@@ -16,6 +16,8 @@ type Connection = {
   lastVerifiedAt: string | null;
   errorMessage: string | null;
   capabilities: Capabilities;
+  lastSyncedAt: string | null;
+  orderCount: number;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -125,6 +127,13 @@ export function ConnectionsPage() {
           <div className="mt-2 grid gap-1 text-xs text-ink2">
             {c.shopId && <span>shop id <b className="font-mono">{c.shopId}</b></span>}
             <span>scopes <b className="font-mono">{c.scopes || "—"}</b></span>
+            {c.status === "connected" && (
+              <span>
+                {c.lastSyncedAt
+                  ? <>last synced <b>{new Date(c.lastSyncedAt).toLocaleString()}</b> · <b className="font-mono">{c.orderCount}</b> orders ingested</>
+                  : "not synced yet — first sync pulls open orders only"}
+              </span>
+            )}
             {c.lastVerifiedAt && <span className="text-mut">verified {new Date(c.lastVerifiedAt).toLocaleString()}</span>}
             {c.errorMessage && <span className="font-semibold text-crit">{c.errorMessage}</span>}
             <span className="text-mut">

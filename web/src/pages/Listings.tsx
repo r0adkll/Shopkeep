@@ -114,12 +114,23 @@ export function ListingsPage() {
             </Card>
           )}
           <div className="grid gap-3 sm:grid-cols-2">
-            {(listings.data ?? []).map((l) => (
+            {(listings.data ?? []).map((l) => {
+              const SYNC: Record<string, [string, string]> = {
+                in_sync: ["IN SYNC", "bg-good/10 text-good"],
+                drifted: ["DRIFTED", "bg-warn/10 text-warn"],
+                imported: ["NEEDS MAPPING", "bg-warn/10 text-warn"],
+                not_published: ["NOT PUBLISHED", "bg-panel2 text-mut"],
+              };
+              const [syncLabel, syncTone] = SYNC[l.syncState] ?? [l.syncState.replace("_", " ").toUpperCase(), "bg-panel2 text-mut"];
+              return (
               <button key={l.id} type="button" onClick={() => open.mutate(l)} className="rounded-xl border border-line bg-panel p-5 text-left shadow-sm hover:border-accent">
                 <div className="flex items-center gap-2.5">
                   <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold">{l.input.title}</h2>
                   <span className={`rounded-full px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider ${STATE_STYLE[l.input.state] ?? ""}`}>
                     {l.input.state.toUpperCase()}
+                  </span>
+                  <span className={`rounded-full px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider ${syncTone}`} title={l.etsyListingId ? `etsy listing ${l.etsyListingId}` : "no platform link yet"}>
+                    {syncLabel}{l.etsyListingId ? " · ETSY" : ""}
                   </span>
                   {l.archived && (
                     <span className="rounded-full bg-line/60 px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider text-mut">ARCHIVED</span>
@@ -127,12 +138,17 @@ export function ListingsPage() {
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink2">
                   <span>{productById.get(l.input.productId)?.name ?? `product ${l.input.productId}`}</span>
-                  <span><b className="font-mono">{l.configurations.filter((c) => c.enabled).length}</b> SKUs</span>
+                  {l.input.skuMode === "listing_level" ? (
+                    <span>SKU <b className="font-mono">{l.input.listingSku ?? "listing-level"}</b></span>
+                  ) : (
+                    <span><b className="font-mono">{l.configurations.filter((c) => c.enabled).length}</b> SKUs</span>
+                  )}
                   <span className="font-mono">${(l.input.basePriceMinor / 100).toFixed(2)}</span>
-                  <span className="tracking-wider text-mut uppercase">{l.syncState.replace("_", " ")}</span>
+                  {l.etsyListingId && <span className="font-mono text-mut">etsy #{l.etsyListingId}</span>}
                 </div>
               </button>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
