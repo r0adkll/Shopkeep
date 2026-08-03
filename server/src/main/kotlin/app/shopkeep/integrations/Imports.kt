@@ -89,6 +89,7 @@ class ImportRepository(
     private val connections: ConnectionRepository,
     private val listings: ListingRepository,
     private val sync: SyncService,
+    private val designs: app.shopkeep.catalog.DesignRepository,
 ) {
     suspend fun list(): List<EtsyImport> = dbQuery {
         EtsyImportsTable.selectAll().orderBy(EtsyImportsTable.id).map { it.toDto() }
@@ -163,14 +164,49 @@ class ImportRepository(
                 quantity = payload.quantity,
                 skuMode = "listing_level",
                 tags = payload.tags,
-                axes = m.axes.filter { it.slotPosition != null }.map { ax ->
-                    AxisInput(
-                        displayName = ax.name,
-                        productSlotPosition = ax.slotPosition!!,
-                        values = ax.values.filter { it.resolution == "material" }.map { v ->
-                            AxisValueInput(materialId = v.materialId!!, platformValue = v.value)
-                        },
-                    )
+                axes = m.axes.mapNotNull { ax ->
+                    val mode = ax.mode ?: if (ax.slotPosition != null) "materials" else "modifier"
+                    when (mode) {
+                        "materials" -> AxisInput(
+                            displayName = ax.name,
+                            productSlotPosition = ax.slotPosition ?: 0,
+                            valueSource = "materials",
+                            values = ax.values.filter { it.resolution == "material" }.map { v ->
+                                AxisValueInput(materialId = v.materialId!!, platformValue = v.value, displayLabel = v.value)
+                            },
+                        )
+                        "designs" -> AxisInput(
+                            displayName = ax.name,
+                            productSlotPosition = 0,
+                            valueSource = "designs",
+                            values = ax.values.filter { it.resolution == "design" && it.designId != null }.map { v ->
+                                AxisValueInput(designId = v.designId, platformValue = v.value, displayLabel = v.value)
+                            },
+                        )
+                        "variants" -> AxisInput(
+                            displayName = ax.name,
+                            productSlotPosition = 0,
+                            valueSource = "variants",
+                            values = ax.values.filter { it.resolution == "variant" && it.variantId != null }.map { v ->
+                                AxisValueInput(variantId = v.variantId, platformValue = v.value, displayLabel = v.value)
+                            },
+                        )
+                        // Modifier axes materialize as explicit override binds:
+                        // values matching a set key bind to it, the rest to base —
+                        // imported listings become rename-safe like authored ones.
+                        else -> {
+                            val setKeys = designs.designs(productId).flatMap { d -> d.overrideSets.map { it.key } }
+                            AxisInput(
+                                displayName = ax.name,
+                                productSlotPosition = 0,
+                                valueSource = "override_sets",
+                                values = ax.values.map { v ->
+                                    val key = setKeys.firstOrNull { it.equals(v.value, ignoreCase = true) }
+                                    AxisValueInput(overrideKey = key ?: "base", platformValue = v.value, displayLabel = v.value)
+                                },
+                            )
+                        }
+                    }
                 },
                 valueResolutions = m.axes.flatMap { ax ->
                     ax.values.filter { it.resolution in setOf("design", "variant", "review", "ignore") }.map { v ->
