@@ -35,7 +35,7 @@ const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
 
 export function RecipeEditor({ existing, onClose }: { existing?: Product; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const materials = useQuery({ queryKey: ["materials"], queryFn: inventoryApi.materials });
+  const materials = useQuery({ queryKey: ["materials", "all"], queryFn: inventoryApi.materialsAll });
   const laborRate = useQuery({ queryKey: ["laborRate"], queryFn: catalogApi.laborRate });
 
   const [p, setP] = useState<ProductInput>(existing ?? EMPTY);
@@ -662,7 +662,12 @@ function RuleComposer({
   // color-map grid automatically — no separate feature to discover.
   const slotCategory = (idx: number) => {
     const sl = p.slots[idx];
-    return byId.get(sl?.optionMaterialIds[0] ?? sl?.fixedMaterialId ?? -1)?.category ?? null;
+    if (!sl) return null;
+    for (const mid of [...sl.optionMaterialIds, sl.fixedMaterialId, sl.defaultMaterialId]) {
+      const cat = mid != null ? byId.get(mid)?.category : undefined;
+      if (cat) return cat;
+    }
+    return null;
   };
   const colorMode = slotCategory(r.whenSlot) === "filament" && slotCategory(r.thenSlot) === "filament";
   const [q, setQ] = useState("");
