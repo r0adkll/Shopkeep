@@ -41,6 +41,7 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
   const [p, setP] = useState<ProductInput>(existing ?? EMPTY);
   const [tab, setTab] = useState<"recipe" | "designs" | "variants">("recipe");
   const [composer, setComposer] = useState<{ index: number | null; rule: Rule } | null>(null);
+  const [mapper, setMapper] = useState<{ source: number; target: number } | null>(null);
 
   const byId = useMemo(() => new Map((materials.data ?? []).map((m) => [m.id, m])), [materials.data]);
   // Products don't own SKUs (listings do, D17) — no enumeration here. The
@@ -220,7 +221,42 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
               Dependency rules{" "}
               <span className="font-normal tracking-normal normal-case text-mut">first matching rule wins</span>
             </h2>
-            {p.rules.map((r, i) => (
+            {(() => {
+              // Single-option rules grouped by (when,then) pair with >=3 entries
+              // render as one collapsed "color map" card instead of N rows.
+              const pairIdx = new Map<string, number[]>();
+              p.rules.forEach((r, i) => {
+                if (r.whenMaterialIds.length === 1) {
+                  const k = `${r.whenSlot}:${r.thenSlot}`;
+                  pairIdx.set(k, [...(pairIdx.get(k) ?? []), i]);
+                }
+              });
+              const collapsedPairs = [...pairIdx.entries()].filter(([, ids]) => ids.length >= 3);
+              const hidden = new Set(collapsedPairs.flatMap(([, ids]) => ids));
+              return (
+                <>
+                  {collapsedPairs.map(([k, ids]) => {
+                    const [w, t] = k.split(":").map(Number);
+                    const total = p.slots[w]?.optionMaterialIds.length ?? 0;
+                    return (
+                      <div key={k} className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-panel px-4 py-3 text-sm shadow-sm">
+                        <span className="text-[10px] font-extrabold tracking-widest text-accent">COLOR MAP</span>
+                        <span className="font-semibold">{p.slots[w]?.name || `slot ${w + 1}`}</span>
+                        <span className="text-mut">→</span>
+                        <span className="font-semibold">{p.slots[t]?.name || `slot ${t + 1}`}</span>
+                        <span className="font-mono text-xs text-ink2">{ids.length}/{total} mapped</span>
+                        {ids.length < total && <span className="text-[11px] text-mut">rest fall through to default</span>}
+                        <span className="ml-auto flex gap-1.5">
+                          <button type="button" onClick={() => setMapper({ source: w, target: t })}
+                            className="rounded border border-line px-2 py-0.5 text-xs text-ink2 hover:text-ink">edit map…</button>
+                          <button type="button" onClick={() => set({ rules: p.rules.filter((_, j) => !ids.includes(j)) })}
+                            title="remove the whole map"
+                            className="rounded-md border border-crit/40 p-1 text-crit hover:border-crit hover:bg-crit/10"><Trash2 size={12} /></button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {p.rules.map((r, i) => hidden.has(i) ? null : (
               <div key={i} className="group mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-panel px-4 py-3 text-sm shadow-sm">
                 <span className="text-[10px] font-extrabold tracking-wider text-mut">RULE {i + 1}</span>
                 <span className="text-[10px] font-extrabold tracking-widest text-accent">WHEN</span>
@@ -246,7 +282,10 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                   </button>
                 </span>
               </div>
-            ))}
+                  ))}
+                </>
+              );
+            })()}
 
             {/* OTHERWISE defaults per rule slot */}
             {ruleSlots.map(({ s, i }) => (
@@ -268,6 +307,25 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
               </div>
             ))}
 
+            {mapper && (
+              <ColorMapper
+                p={p}
+                byId={byId}
+                sourceIdx={mapper.source}
+                targetIdx={mapper.target}
+                onPair={(source, target) => setMapper({ source, target })}
+                choiceSlots={choiceSlots}
+                ruleSlots={ruleSlots}
+                onSave={(compiled) => {
+                  const keep = p.rules.filter(
+                    (r) => !(r.whenMaterialIds.length === 1 && r.whenSlot === mapper.source && r.thenSlot === mapper.target),
+                  );
+                  set({ rules: [...keep, ...compiled] });
+                  setMapper(null);
+                }}
+                onCancel={() => setMapper(null)}
+              />
+            )}
             {composer ? (
               <RuleComposer
                 p={p}
@@ -301,6 +359,16 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                   + Add rule
                 </button>
               )
+            )}
+            {!composer && !mapper && choiceSlots.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setMapper({ source: choiceSlots[0].i, target: ruleSlots[0].i })}
+                className="mt-2 w-full rounded-lg border border-dashed border-line py-2 text-sm text-accent hover:border-accent"
+                title="align each source color to a target material — compiles to one rule per color"
+              >
+                🎨 Map colors…
+              </button>
             )}
           </>
         )}
@@ -737,6 +805,131 @@ function RuleComposer({
         <button type="button" onClick={onCancel} className="rounded-md border border-line px-4 py-1.5 text-sm text-ink2">
           Cancel
         </button>
+      </div>
+    </div>
+  );
+}
+
+
+/** Color-to-color aligner (the import matcher's grammar applied to rules):
+ *  one row per source-slot option, auto-suggested by name tokens then hue
+ *  distance; saves as one single-option rule per mapped color. */
+function ColorMapper({
+  p, byId, sourceIdx, targetIdx, choiceSlots, ruleSlots, onPair, onSave, onCancel,
+}: {
+  p: ProductInput;
+  byId: Map<number, Material>;
+  sourceIdx: number;
+  targetIdx: number;
+  choiceSlots: { s: Slot; i: number }[];
+  ruleSlots: { s: Slot; i: number }[];
+  onPair: (source: number, target: number) => void;
+  onSave: (rules: Rule[]) => void;
+  onCancel: () => void;
+}) {
+  const source = p.slots[sourceIdx];
+  const target = p.slots[targetIdx];
+  const targetIds = target?.optionMaterialIds ?? [];
+
+  const STOP = new Set(["pla", "tpu", "petg", "abs", "basic", "matte", "silk", "translucent", "transparent", "hs"]);
+  const tokens = (name: string) => name.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 2 && !STOP.has(t));
+  const rgb = (hex?: string | null) => {
+    if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return null;
+    return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  };
+  const suggest = (srcId: number): number | null => {
+    const sm = byId.get(srcId);
+    if (!sm) return null;
+    const st = new Set(tokens(sm.name));
+    let best: number | null = null;
+    let bestScore = 0;
+    for (const tid of targetIds) {
+      const tm = byId.get(tid);
+      if (!tm) continue;
+      const score = tokens(tm.name).filter((t) => st.has(t)).length;
+      if (score > bestScore) { bestScore = score; best = tid; }
+    }
+    if (best != null) return best;
+    const sc = rgb(materialColor(sm));
+    if (!sc) return null;
+    let bestD = Infinity;
+    for (const tid of targetIds) {
+      const tc = rgb(materialColor(byId.get(tid)!));
+      if (!tc) continue;
+      const d = (sc[0] - tc[0]) ** 2 + (sc[1] - tc[1]) ** 2 + (sc[2] - tc[2]) ** 2;
+      if (d < bestD) { bestD = d; best = tid; }
+    }
+    return best;
+  };
+
+  const [map, setMap] = useState<Map<number, number | null>>(() => {
+    const m = new Map<number, number | null>();
+    const existing = new Map<number, number>();
+    p.rules.forEach((r) => {
+      if (r.whenMaterialIds.length === 1 && r.whenSlot === sourceIdx && r.thenSlot === targetIdx) {
+        existing.set(r.whenMaterialIds[0], r.thenMaterialId);
+      }
+    });
+    for (const srcId of source?.optionMaterialIds ?? []) {
+      m.set(srcId, existing.get(srcId) ?? suggest(srcId));
+    }
+    return m;
+  });
+
+  const mapped = [...map.values()].filter((v) => v != null).length;
+  const save = () => {
+    const rules: Rule[] = [];
+    for (const [srcId, tgtId] of map) {
+      if (tgtId != null) rules.push({ whenSlot: sourceIdx, whenMaterialIds: [srcId], thenSlot: targetIdx, thenMaterialId: tgtId });
+    }
+    onSave(rules);
+  };
+
+  return (
+    <div className="mt-2 rounded-xl border-2 border-accent bg-panel p-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-[10px] font-extrabold tracking-widest text-accent">COLOR MAP</span>
+        <select value={sourceIdx} onChange={(e) => onPair(+e.target.value, targetIdx)} className="rounded-md border border-line bg-panel2 px-2 py-1">
+          {choiceSlots.map(({ s, i }) => <option key={i} value={i}>{s.name || `slot ${i + 1}`}</option>)}
+        </select>
+        <span className="text-mut">each color sets</span>
+        <select value={targetIdx} onChange={(e) => onPair(sourceIdx, +e.target.value)} className="rounded-md border border-line bg-panel2 px-2 py-1">
+          {ruleSlots.map(({ s, i }) => <option key={i} value={i}>{s.name || `slot ${i + 1}`}</option>)}
+        </select>
+        <span className="ml-auto font-mono text-xs text-ink2">{mapped}/{map.size} mapped</span>
+      </div>
+      <div className="mt-2 max-h-80 overflow-y-auto">
+        {[...map.entries()].map(([srcId, tgtId]) => {
+          const sm = byId.get(srcId);
+          return (
+            <div key={srcId} className="flex items-center gap-2.5 border-b border-line/50 py-1.5 text-[13px] last:border-0">
+              <span className="h-3.5 w-3.5 flex-none rounded-full border border-line" style={{ background: sm ? (materialColor(sm) ?? "var(--color-panel2)") : undefined }} />
+              <span className="w-52 flex-none truncate" title={sm?.name}>{sm?.name ?? "?"}</span>
+              <span className="text-[11px] text-mut">→</span>
+              <select
+                value={tgtId ?? ""}
+                onChange={(e) => setMap((prev) => new Map(prev).set(srcId, e.target.value ? +e.target.value : null))}
+                className="min-w-0 flex-1 rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
+              >
+                <option value="">— fall through to default</option>
+                {targetIds.map((tid) => <option key={tid} value={tid}>{byId.get(tid)?.name}</option>)}
+              </select>
+              <span
+                className="h-3.5 w-3.5 flex-none rounded-full border border-line"
+                style={{ background: tgtId != null ? (materialColor(byId.get(tgtId)!) ?? "var(--color-panel2)") : "transparent" }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex gap-2">
+        <button type="button" onClick={save} className="rounded-md bg-accent px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+          Save map ({mapped} rules)
+        </button>
+        <button type="button" onClick={onCancel} className="rounded-md border border-line px-4 py-1.5 text-sm text-ink2 hover:text-ink">
+          Cancel
+        </button>
+        <span className="ml-auto self-center text-[11px] text-mut">compiles to one rule per color — hand-written rules above still win first</span>
       </div>
     </div>
   );
