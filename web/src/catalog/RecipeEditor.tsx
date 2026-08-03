@@ -515,7 +515,7 @@ function SlotCard({
     });
 
   // The set the filter row currently describes — bulk actions act on exactly this.
-  const filtered = all.filter((m) => m.category === catFilter && matchesQuery(m, query));
+  const filtered = all.filter((m) => !m.archived && m.category === catFilter && matchesQuery(m, query));
   const filteredSelected = filtered.filter((m) => slot.optionMaterialIds.includes(m.id)).length;
   const selectAllFiltered = () =>
     onChange({ optionMaterialIds: [...new Set([...slot.optionMaterialIds, ...filtered.map((m) => m.id)])] });
@@ -610,7 +610,7 @@ function SlotCard({
               all.filter(
                 (m) =>
                   slot.optionMaterialIds.includes(m.id) ||
-                  (m.category === catFilter && matchesQuery(m, query)),
+                  (!m.archived && m.category === catFilter && matchesQuery(m, query)),
               ),
               sort,
             ).map((m) => {

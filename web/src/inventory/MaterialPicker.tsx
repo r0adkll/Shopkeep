@@ -35,7 +35,7 @@ export function MaterialPicker({
   }
 
   const pool = category ? all.filter((m) => m.category === category) : all;
-  const matches = sortMaterials(pool.filter((m) => matchesQuery(m, q)), "name").slice(0, 8);
+  const matches = sortMaterials(pool.filter((m) => !m.archived && matchesQuery(m, q)), "name").slice(0, 8);
   return (
     <span className="block">
       <input
