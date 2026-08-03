@@ -492,6 +492,16 @@ function SlotCard({
         : [...slot.optionMaterialIds, id],
     });
 
+  // The set the filter row currently describes — bulk actions act on exactly this.
+  const filtered = all.filter((m) => m.category === catFilter && matchesQuery(m, query));
+  const filteredSelected = filtered.filter((m) => slot.optionMaterialIds.includes(m.id)).length;
+  const selectAllFiltered = () =>
+    onChange({ optionMaterialIds: [...new Set([...slot.optionMaterialIds, ...filtered.map((m) => m.id)])] });
+  const clearFiltered = () => {
+    const ids = new Set(filtered.map((m) => m.id));
+    onChange({ optionMaterialIds: slot.optionMaterialIds.filter((x) => !ids.has(x)) });
+  };
+
   return (
     <div className="group mt-2 rounded-xl border border-line bg-panel px-4 py-3 shadow-sm">
       <div className="flex flex-wrap items-center gap-3">
@@ -546,6 +556,27 @@ function SlotCard({
               <option value="type">type</option>
               <option value="stock">stock</option>
             </select>
+            <span className="ml-auto flex items-center gap-2">
+              <span className="font-mono">{filteredSelected}/{filtered.length}</span>
+              <button
+                type="button"
+                onClick={selectAllFiltered}
+                disabled={filteredSelected === filtered.length || filtered.length === 0}
+                className="text-accent underline-offset-2 hover:underline disabled:cursor-default disabled:text-mut disabled:no-underline"
+                title="add every material matching the current filter"
+              >
+                select all
+              </button>
+              <button
+                type="button"
+                onClick={clearFiltered}
+                disabled={filteredSelected === 0}
+                className="text-accent underline-offset-2 hover:underline disabled:cursor-default disabled:text-mut disabled:no-underline"
+                title="remove every filtered material from the palette (selections outside the filter are kept)"
+              >
+                none
+              </button>
+            </span>
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {sortMaterials(
