@@ -507,7 +507,12 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         val resp = http.submitForm(
             url = "$apiBase$path",
             formParameters = parameters {
-                fields.forEach { (k, v) -> append(k, v.toString().trim('"')) }
+                fields.forEach { (k, v) ->
+                    // JsonPrimitive.toString() re-encodes (quotes + \n escapes);
+                    // .content is the actual string value.
+                    val value = (v as? kotlinx.serialization.json.JsonPrimitive)?.content ?: v.toString()
+                    append(k, value)
+                }
             },
         ) {
             this.method = io.ktor.http.HttpMethod.Patch
