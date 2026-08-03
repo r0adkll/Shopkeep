@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PushReview } from "./PushReview";
 import { formatQty, inventoryApi, materialColor, type Material } from "../inventory/api";
@@ -744,7 +744,14 @@ export function ListingEditor({
                 }`}>
                   {dirty ? "UNSAVED EDITS" : pushPreview.isLoading ? "CHECKING…" : (pushPreview.data?.changes.length ?? 0) > 0 ? `${pushPreview.data!.changes.length} TO PUSH` : "IN SYNC"}
                 </span>
-                <span className="font-mono text-[11px] text-mut">#{existing.etsyListingId}</span>
+                <a
+                  href={`https://www.etsy.com/listing/${existing.etsyListingId}`}
+                  target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1 font-mono text-[11px] text-accent hover:underline"
+                  title="open this listing on Etsy"
+                >
+                  #{existing.etsyListingId} <ExternalLink size={10} />
+                </a>
               </>
             ) : (
               <span className="rounded-full bg-line/60 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-mut">NOT LINKED</span>
