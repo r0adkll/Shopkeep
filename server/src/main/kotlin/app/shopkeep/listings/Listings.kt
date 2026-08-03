@@ -70,6 +70,8 @@ object ListingsTable : Table("listings") {
     val valueResolutions = jsonb<List<ValueResolution>>("value_resolutions", Json.Default)
     val listingSku = text("listing_sku").nullable()
     val comboSkus = jsonb<List<ComboSku>>("combo_skus", Json.Default)
+    val pushedSnapshot = jsonb<app.shopkeep.integrations.PushSnapshot>("pushed_snapshot", Json.Default).nullable()
+    val lastPushError = text("last_push_error").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 

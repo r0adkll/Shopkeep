@@ -9,6 +9,9 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
+import io.ktor.client.request.request
+import io.ktor.client.request.setBody
+import io.ktor.http.contentType
 import io.ktor.client.request.headers
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
@@ -450,6 +453,68 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                 ).results
             }.getOrElse { emptyList() }
         }
+    }
+
+    data class ApiCreds(val keystring: String, val secret: String, val access: String, val shopId: String)
+
+    suspend fun creds(connectionId: Long): ApiCreds? {
+        val status = verify(connectionId)?.status ?: return null
+        if (status != "connected") return null
+        val row = dbQuery { ConnectionsTable.selectAll().where { ConnectionsTable.id eq connectionId }.single() }
+        return ApiCreds(
+            row[ConnectionsTable.apiKeystring],
+            row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: "",
+            row[ConnectionsTable.accessTokenEnc]?.let(crypto::decrypt) ?: return null,
+            row[ConnectionsTable.shopId] ?: return null,
+        )
+    }
+
+    /** One listing with inventory — diff baseline for review & push.
+     *  getListing's includes enum has no Inventory; fetch it separately. */
+    suspend fun fetchListing(connectionId: Long, etsyListingId: String): EtsyShopListing? {
+        val c = creds(connectionId) ?: return null
+        return runCatching {
+            val listing = etsyGet<EtsyShopListing>("$apiBase/listings/$etsyListingId", c.keystring, c.secret, c.access)
+            val inv = runCatching {
+                etsyGet<EtsyInventory>("$apiBase/listings/$etsyListingId/inventory", c.keystring, c.secret, c.access)
+            }.getOrNull()
+            listing.copy(inventory = inv)
+        }.getOrNull()
+    }
+
+    /** Authenticated write to Etsy; returns error text or null on success. */
+    suspend fun etsyWrite(connectionId: Long, method: String, path: String, jsonBody: String): String? {
+        val c = creds(connectionId) ?: return "Connection not available."
+        val resp = http.request("$apiBase$path") {
+            this.method = io.ktor.http.HttpMethod.parse(method)
+            headers {
+                append("x-api-key", if (c.secret.isBlank()) c.keystring else "${c.keystring}:${c.secret}")
+                append(HttpHeaders.Authorization, "Bearer ${c.access}")
+            }
+            contentType(io.ktor.http.ContentType.Application.Json)
+            setBody(jsonBody)
+        }
+        return if (resp.status.isSuccess()) null
+        else "Etsy ${resp.status.value} on $path: ${resp.bodyAsText().take(300)}"
+    }
+
+    /** updateListing is form-encoded; values from a flat JSON object. */
+    suspend fun etsyWriteForm(connectionId: Long, path: String, fields: kotlinx.serialization.json.JsonObject): String? {
+        val c = creds(connectionId) ?: return "Connection not available."
+        val resp = http.submitForm(
+            url = "$apiBase$path",
+            formParameters = parameters {
+                fields.forEach { (k, v) -> append(k, v.toString().trim('"')) }
+            },
+        ) {
+            this.method = io.ktor.http.HttpMethod.Patch
+            headers {
+                append("x-api-key", if (c.secret.isBlank()) c.keystring else "${c.keystring}:${c.secret}")
+                append(HttpHeaders.Authorization, "Bearer ${c.access}")
+            }
+        }
+        return if (resp.status.isSuccess()) null
+        else "Etsy ${resp.status.value} on $path: ${resp.bodyAsText().take(300)}"
     }
 
     /** Etsy's actual processing fees for a receipt (payments API amount_fees), in minor units. */

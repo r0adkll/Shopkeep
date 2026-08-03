@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { PushReview } from "./PushReview";
 import { formatQty, inventoryApi, materialColor, type Material } from "../inventory/api";
 import { MaterialPicker } from "../inventory/MaterialPicker";
 import { catalogApi, documentUrl, skuCodes, uploadImage, type Product, type ServerConfiguration } from "../catalog/api";
@@ -90,6 +91,7 @@ export function ListingEditor({
   const byId = useMemo(() => new Map((materials.data ?? []).map((m) => [m.id, m])), [materials.data]);
 
   const [l, setL] = useState<ListingInput>(existing?.input ?? defaultInput(product, byId));
+  const [reviewing, setReviewing] = useState(false);
   const [priceStr, setPriceStr] = useState(existing ? (existing.input.basePriceMinor / 100).toFixed(2) : "");
   const [editingProfile, setEditingProfile] = useState(false);
   const set = (patch: Partial<ListingInput>) => setL((prev) => ({ ...prev, ...patch }));
@@ -727,6 +729,23 @@ export function ListingEditor({
         <Button type="button" disabled={save.isPending || !l.title} onClick={() => save.mutate()}>
           {save.isPending ? "Saving…" : existing ? "Save listing" : "Create listing"}
         </Button>
+        {existing?.etsyListingId && (
+          <button
+            type="button"
+            onClick={() => setReviewing(true)}
+            className="mt-2 w-full rounded-md border border-accent px-4 py-2 font-semibold text-accent hover:bg-accent/5"
+            title="diff against the live Etsy listing — nothing pushes without review"
+          >
+            Review & push to Etsy…
+          </button>
+        )}
+        {reviewing && existing && (
+          <PushReview
+            listingId={existing.id}
+            onClose={() => setReviewing(false)}
+            onPushed={() => queryClient.invalidateQueries({ queryKey: ["listings"] })}
+          />
+        )}
         <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 text-sm text-ink2 hover:text-ink">
           Cancel
         </button>

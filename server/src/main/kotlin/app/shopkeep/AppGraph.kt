@@ -10,6 +10,7 @@ import app.shopkeep.integrations.ConnectionRepository
 import app.shopkeep.catalog.DesignRepository
 import app.shopkeep.integrations.ImportRepository
 import app.shopkeep.integrations.LaneRepository
+import app.shopkeep.integrations.PushService
 import app.shopkeep.integrations.SyncService
 import app.shopkeep.listings.ListingRepository
 import app.shopkeep.inventory.MaterialRepository
@@ -41,6 +42,7 @@ interface AppGraph {
     val laneRepository: LaneRepository
     val importRepository: ImportRepository
     val designRepository: DesignRepository
+    val pushService: PushService
 
     @Provides
     @SingleIn(AppScope::class)
