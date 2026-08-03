@@ -171,12 +171,49 @@ export function ImportEtsyPage() {
   );
 }
 
+function OverrideMatchCheck({ axisValues, designs }: { axisValues: string[]; designs: { name: string; overrideSets: { key: string }[] }[] }) {
+  const withSets = designs.filter((d) => d.overrideSets.length > 0);
+  const allKeys = withSets.flatMap((d) => d.overrideSets.map((os) => ({ design: d.name, key: os.key })));
+  const orphans = allKeys.filter((k) => !axisValues.some((v) => v.toLowerCase() === k.key.toLowerCase()));
+  return (
+    <div className="mt-1.5 w-full rounded-lg border border-dashed border-line px-3 py-2 text-xs">
+      <div className="mb-1 text-[9px] font-extrabold tracking-widest text-mut uppercase">Override match check</div>
+      {axisValues.map((v) => {
+        const hits = allKeys.filter((k) => k.key.toLowerCase() === v.toLowerCase());
+        return (
+          <div key={v} className="flex gap-2 py-0.5 text-ink2">
+            <span className="w-28 flex-none font-mono">“{v}”</span>
+            <span>
+              {hits.length ? <>matches override set on <b>{hits.map((h) => h.design).join(", ")}</b> ✓ · others use base</> : "no override sets — all designs use base composition"}
+              <span className="ml-1.5 rounded-full bg-good/10 px-1.5 text-[8.5px] font-extrabold text-good">OK</span>
+            </span>
+          </div>
+        );
+      })}
+      {orphans.map((o, i) => (
+        <div key={i} className="flex gap-2 py-0.5 text-warn">
+          <span className="w-28 flex-none">—</span>
+          <span>
+            <b>{o.design}</b> has an override set <span className="font-mono">“{o.key}”</span> matching no value here — it will never fire.
+            <span className="ml-1.5 rounded-full bg-warn/10 px-1.5 text-[8.5px] font-extrabold text-warn">NEVER MATCHES</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; products: ProductSummary[]; onBack: () => void }) {
   const { imp, materials, products, onBack } = props;
   const [mapping, setMapping] = useState<Mapping>(imp.mapping);
   const designs = useQuery({
     queryKey: ["designs", mapping.productId],
-    queryFn: () => jsonFetch<{ id: number; name: string }[]>(`/api/v1/catalog/products/${mapping.productId}/designs`),
+    queryFn: () => jsonFetch<{ id: number; name: string; overrideSets: { key: string }[] }[]>(`/api/v1/catalog/products/${mapping.productId}/designs`),
+    enabled: mapping.productId != null,
+  });
+  const productDetail = useQuery({
+    queryKey: ["product", mapping.productId],
+    queryFn: () => catalogApi.product(mapping.productId!),
     enabled: mapping.productId != null,
   });
   const variants = useQuery({
@@ -226,6 +263,9 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
         <span>etsy #{imp.etsyListingId}</span><span>qty {imp.payload.quantity}</span><span>{imp.payload.state}</span>
       </div>
 
+      <div className="mb-3 rounded-lg bg-panel2 px-4 py-2.5 text-xs text-ink2">
+        How matching works: an <b className="text-ink">Etsy variation</b> → fills a <b className="text-ink">recipe slot</b> → each value picks <b className="text-ink">what goes in it</b> — a material, a design (colorway), or a variant (build style).
+      </div>
       <div className="mb-3 rounded-xl border border-line bg-panel p-4 shadow-sm">
         <div className="mb-2 text-[10px] font-extrabold tracking-widest text-mut uppercase">1 · Link to a Shopkeep product</div>
         <div className="flex flex-wrap items-center gap-3">
@@ -237,6 +277,11 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
             <option value="">Choose product (recipe)…</option>
             {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          {mapping.productId != null && (
+            <span className="rounded-full bg-good/10 px-2.5 py-0.5 text-[9px] font-extrabold tracking-wider text-good">
+              {(designs.data ?? []).length} DESIGNS · {(variants.data ?? []).length} VARIANTS AVAILABLE
+            </span>
+          )}
         </div>
         <div className="mt-2 grid gap-1.5">
           {mapping.axes.map((ax, i) => (
@@ -247,11 +292,18 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
                 onChange={(e) => setAxis(i, (a) => ({ ...a, slotPosition: e.target.value === "" ? null : Number(e.target.value) }))}
                 className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs outline-none focus:border-accent"
               >
-                <option value="">not material-bearing</option>
-                <option value="0">→ choice slot 1</option>
-                <option value="1">→ choice slot 2</option>
-                <option value="2">→ choice slot 3</option>
+                <option value="">doesn't affect materials — override sets match its values automatically</option>
+                {(productDetail.data?.slots ?? []).map((sl, si) =>
+                  sl.kind === "CHOICE" ? (
+                    <option key={si} value={si}>
+                      fills → {sl.name} ({sl.quantity}{sl.optional ? ", optional" : ""})
+                    </option>
+                  ) : null,
+                )}
               </select>
+              {ax.slotPosition == null && (designs.data ?? []).some((d) => d.overrideSets.length > 0) && (
+                <OverrideMatchCheck axisValues={ax.values.map((v) => v.value)} designs={designs.data!} />
+              )}
             </div>
           ))}
         </div>

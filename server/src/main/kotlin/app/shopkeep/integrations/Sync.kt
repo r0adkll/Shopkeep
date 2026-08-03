@@ -472,32 +472,51 @@ class SyncService(
             )
         }
 
+        // Pass 1: match each axis; collect designs to expand, a variant, and
+        // any EXPLICIT override-set bind (authored axis-2, label-rename-safe).
+        val pendingDesigns = mutableListOf<Long>()
+        var boundOverrideKey: String? = null
         for (axis in listing.input.axes) {
             val varVal = orderValues.firstOrNull { it.name.equals(axis.displayName, ignoreCase = true) }?.value
             if (varVal == null) { review = true; continue }
-            // 1) plain material mapping on this axis
-            val hit = axis.values.firstOrNull { it.platformValue.equals(varVal, ignoreCase = true) }
-            if (hit != null) { addSelection(axis.productSlotPosition, hit.materialId, slotQty(axis.productSlotPosition)); continue }
-            // 2) design / variant / review / ignore resolution
+            // axis value rows match by Etsy platform value or the buyer-facing label
+            val hit = axis.values.firstOrNull {
+                it.platformValue.equals(varVal, ignoreCase = true) || it.displayLabel.equals(varVal, ignoreCase = true)
+            }
+            if (hit != null) {
+                when {
+                    hit.overrideKey != null -> if (hit.overrideKey != "base") boundOverrideKey = hit.overrideKey
+                    hit.variantId != null -> {
+                        val v = designs.variant(hit.variantId!!)
+                        if (v == null) review = true else variantAdj = v.adjustments
+                    }
+                    hit.designId != null -> pendingDesigns += hit.designId!!
+                    hit.materialId != null -> addSelection(axis.productSlotPosition, hit.materialId!!, slotQty(axis.productSlotPosition))
+                    else -> review = true
+                }
+                continue
+            }
+            // imported-listing path: value_resolutions by axis+value
             val res = resolutions.firstOrNull { it.axis.equals(axis.displayName, true) && it.value.equals(varVal, true) }
             when (res?.kind) {
-                "design" -> {
-                    val d = res.refId?.let { designs.design(it) }
-                    if (d == null) { review = true; continue }
-                    // composition modifier: any other order value matching an override-set key
-                    val set = d.overrideSets.firstOrNull { os ->
-                        orderValues.any { it.value.equals(os.key, ignoreCase = true) }
-                    }
-                    for (a in (set?.assignments ?: d.assignments)) {
-                        addSelection(a.slotPosition, a.materialId, a.qtyOverride ?: slotQty(a.slotPosition))
-                    }
-                }
+                "design" -> res.refId?.let { pendingDesigns += it } ?: run { review = true }
                 "variant" -> {
                     val v = res.refId?.let { designs.variant(it) }
-                    if (v == null) { review = true } else variantAdj = v.adjustments
+                    if (v == null) review = true else variantAdj = v.adjustments
                 }
                 "ignore" -> {}
                 else -> review = true // "review" or unmapped value
+            }
+        }
+        // Pass 2: expand designs — explicit bind wins; else name-match any
+        // order value against override-set keys (imported listings).
+        for (designId in pendingDesigns) {
+            val d = designs.design(designId)
+            if (d == null) { review = true; continue }
+            val set = boundOverrideKey?.let { k -> d.overrideSets.firstOrNull { it.key.equals(k, true) } }
+                ?: d.overrideSets.firstOrNull { os -> orderValues.any { it.value.equals(os.key, ignoreCase = true) } }
+            for (a in (set?.assignments ?: d.assignments)) {
+                addSelection(a.slotPosition, a.materialId, a.qtyOverride ?: slotQty(a.slotPosition))
             }
         }
         // resolutions can also live on non-slot axes (e.g. a style axis mapped to variants)

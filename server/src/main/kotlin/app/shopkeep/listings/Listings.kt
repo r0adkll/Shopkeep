@@ -68,6 +68,7 @@ object ListingsTable : Table("listings") {
     val lastPushedAt = timestampWithTimeZone("last_pushed_at").nullable()
     val archivedAt = timestampWithTimeZone("archived_at").nullable()
     val valueResolutions = jsonb<List<ValueResolution>>("value_resolutions", Json.Default)
+    val listingSku = text("listing_sku").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -77,18 +78,23 @@ object ListingAxesTable : Table("listing_axes") {
     val position = integer("position")
     val displayName = text("display_name")
     val productSlotPosition = integer("product_slot_position")
+    val valueSource = text("value_source")
     override val primaryKey = PrimaryKey(id)
 }
 
 object ListingAxisValuesTable : Table("listing_axis_values") {
     val id = long("id").autoIncrement()
     val axisId = long("axis_id")
-    val materialId = long("material_id")
+    val materialId = long("material_id").nullable()
     val position = integer("position")
     val offered = bool("offered")
     val platformSku = text("platform_sku").nullable()
     val priceOverrideMinor = long("price_override_minor").nullable()
     val platformValue = text("platform_value").nullable()
+    val designId = long("design_id").nullable()
+    val variantId = long("variant_id").nullable()
+    val overrideKey = text("override_key").nullable()
+    val displayLabel = text("display_label").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -138,15 +144,19 @@ data class ValueResolution(
 
 @Serializable
 data class AxisValueInput(
-    val materialId: Long,
+    val materialId: Long? = null,
     val offered: Boolean = true,
     val platformSku: String? = null,
     val priceOverrideMinor: Long? = null,
     val platformValue: String? = null, // Etsy's value string (imported listings)
+    val designId: Long? = null,
+    val variantId: Long? = null,
+    val overrideKey: String? = null, // 'base' or a design override-set key (explicit bind)
+    val displayLabel: String? = null, // buyer-facing label; never renames the source
 )
 
 @Serializable
-data class AxisInput(val displayName: String, val productSlotPosition: Int, val values: List<AxisValueInput>)
+data class AxisInput(val displayName: String, val productSlotPosition: Int, val values: List<AxisValueInput>, val valueSource: String = "materials")
 
 @Serializable
 data class ExtraInput(val materialId: Long, val quantity: Double, val basis: String)
@@ -171,6 +181,7 @@ data class ListingInput(
     val extras: List<ExtraInput> = emptyList(),
     val disabledSkus: List<String> = emptyList(),
     val valueResolutions: List<ValueResolution> = emptyList(),
+    val listingSku: String? = null,
 )
 
 @Serializable
@@ -331,6 +342,7 @@ class ListingRepository(private val products: ProductRepository) {
                 it[position] = pos
                 it[displayName] = axis.displayName.trim()
                 it[productSlotPosition] = axis.productSlotPosition
+                it[valueSource] = axis.valueSource
             } get ListingAxesTable.id
             axis.values.forEachIndexed { vpos, v ->
                 ListingAxisValuesTable.insert {
@@ -341,6 +353,10 @@ class ListingRepository(private val products: ProductRepository) {
                     it[platformSku] = v.platformSku
                     it[priceOverrideMinor] = v.priceOverrideMinor
                     it[platformValue] = v.platformValue
+                    it[designId] = v.designId
+                    it[variantId] = v.variantId
+                    it[overrideKey] = v.overrideKey
+                    it[displayLabel] = v.displayLabel
                 }
             }
         }
@@ -358,12 +374,13 @@ class ListingRepository(private val products: ProductRepository) {
      *  configurations and keep those whose choice-slot selections are offered
      *  on every axis. */
     private suspend fun generateConfigurations(input: ListingInput): List<Configuration> {
-        // Listing-level SKU mode (imported listings): no per-combo configurations;
-        // orders resolve dynamically via axis platform_value -> material.
+        // Listing-level SKU mode (imported or design/variant-sourced axes):
+        // no per-combo configurations; orders resolve dynamically.
         if (input.skuMode == "listing_level") return emptyList()
+        if (input.axes.any { it.valueSource != "materials" }) return emptyList()
         val all = products.configurations(input.productId) ?: emptyList()
         val offeredBySlot = input.axes.associate { axis ->
-            axis.productSlotPosition to axis.values.filter { it.offered }.map { it.materialId }.toSet()
+            axis.productSlotPosition to axis.values.filter { it.offered }.mapNotNull { it.materialId }.toSet()
         }
         return all.filter { c ->
             c.resolved && c.sku != null && c.selections.all { sel ->
@@ -374,6 +391,7 @@ class ListingRepository(private val products: ProductRepository) {
 
     private fun ListingsTable.write(it: org.jetbrains.exposed.sql.statements.UpdateBuilder<*>, input: ListingInput) {
         it[valueResolutions] = input.valueResolutions
+        it[listingSku] = input.listingSku
         it[productId] = input.productId
         it[title] = input.title.trim()
         it[description] = input.description
@@ -397,6 +415,7 @@ class ListingRepository(private val products: ProductRepository) {
                 AxisInput(
                     displayName = a[ListingAxesTable.displayName],
                     productSlotPosition = a[ListingAxesTable.productSlotPosition],
+                    valueSource = a[ListingAxesTable.valueSource],
                     values = ListingAxisValuesTable.selectAll()
                         .where { ListingAxisValuesTable.axisId eq a[ListingAxesTable.id] }
                         .orderBy(ListingAxisValuesTable.position)
@@ -407,6 +426,10 @@ class ListingRepository(private val products: ProductRepository) {
                                 v[ListingAxisValuesTable.platformSku],
                                 v[ListingAxisValuesTable.priceOverrideMinor],
                                 v[ListingAxisValuesTable.platformValue],
+                                v[ListingAxisValuesTable.designId],
+                                v[ListingAxisValuesTable.variantId],
+                                v[ListingAxisValuesTable.overrideKey],
+                                v[ListingAxisValuesTable.displayLabel],
                             )
                         },
                 )
@@ -420,6 +443,7 @@ class ListingRepository(private val products: ProductRepository) {
             id = row[ListingsTable.id],
             input = ListingInput(
                 valueResolutions = row[ListingsTable.valueResolutions],
+                listingSku = row[ListingsTable.listingSku],
                 productId = row[ListingsTable.productId],
                 title = row[ListingsTable.title],
                 description = row[ListingsTable.description],
