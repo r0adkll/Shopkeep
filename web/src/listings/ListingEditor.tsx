@@ -227,16 +227,14 @@ export function ListingEditor({
             >
               <option value="listing_level">one SKU for the listing</option>
               <option value="per_primary">SKU per primary value</option>
-              <option
-                value="per_combination"
-                disabled={l.axes.some((a) => (a.valueSource ?? "materials") !== "materials")}
-              >
-                SKU per combination{l.axes.some((a) => (a.valueSource ?? "materials") !== "materials") ? " — material axes only" : ` (${derived.length}/400)`}
+              <option value="per_combination">
+                SKU per combination ({l.axes.reduce((n, a) => n * Math.max(a.values.filter((v) => v.offered).length, 1), l.axes.length ? 1 : 0)}/400)
               </option>
             </select>
-            {l.skuMode === "per_combination" && derived.length > 400 && (
-              <span className="text-[11px] font-bold text-crit">▲ {derived.length} combos — Etsy caps a listing at 400; trim offered values or switch mode</span>
-            )}
+            {l.skuMode === "per_combination" &&
+              l.axes.reduce((n, a) => n * Math.max(a.values.filter((v) => v.offered).length, 1), l.axes.length ? 1 : 0) > 400 && (
+                <span className="text-[11px] font-bold text-crit">▲ over Etsy's 400-combination cap — trim offered values or switch mode</span>
+              )}
             {l.skuMode === "listing_level" && (
               <input
                 value={l.listingSku ?? ""}
@@ -317,7 +315,7 @@ export function ListingEditor({
                           : defaultInput(product, byId).axes[ai]?.values ?? [];
                   set({
                     axes: l.axes.map((a, j) => (j === ai ? { ...a, valueSource: src, values } : a)),
-                    ...(src !== "materials" && l.skuMode === "per_combination" ? { skuMode: "listing_level" as const } : {}),
+
                   });
                 }}
                 className="ml-auto rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
