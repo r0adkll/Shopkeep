@@ -24,7 +24,7 @@ const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
 export function defaultInput(product: Product, byId: Map<number, Material>): ListingInput {
   const codes = skuCodes(product, byId);
   const axes: Axis[] = product.slots
-    .map((s, i) => ({ s, i }))
+    .map((s, i) => ({ s: { ...s, optionMaterialIds: s.optionMaterialIds.filter((id) => !byId.get(id)?.archived) }, i }))
     .filter(({ s }) => s.kind === "CHOICE")
     .map(({ s, i }, axisIdx) => ({
       displayName: s.name,
@@ -132,7 +132,7 @@ export function ListingEditor({
    * the combo) plus variant slot-deltas/extras. */
   const comboRows = useMemo(() => {
     if (!l.axes.some((a) => (a.valueSource ?? "materials") !== "materials")) return [];
-    const axesVals = l.axes.map((a) => a.values.filter((v) => v.offered));
+    const axesVals = l.axes.map((a) => a.values.filter((v) => v.offered && (v.materialId == null || !byId.get(v.materialId)?.archived)));
     if (axesVals.some((vs) => vs.length === 0)) return [];
     const combos: (typeof axesVals)[number][] = axesVals.reduce<(typeof axesVals)[number][]>(
       (acc, vs) => acc.flatMap((c) => vs.map((v) => [...c, v])),

@@ -143,6 +143,12 @@ data class ComboSku(val values: List<String>, val sku: String)
 
 /** The platform-facing shape of a listing — single source for push diffs,
  *  pending-change detection, and the background drift check. */
+/** Same shape with archived-material values removed — archived = removed
+ *  from every platform-facing computation. */
+fun ListingInput.pushShapeActive(archivedIds: Set<Long>) =
+    copy(axes = axes.map { ax -> ax.copy(values = ax.values.filter { it.materialId == null || it.materialId !in archivedIds }) })
+        .pushShape()
+
 fun ListingInput.pushShape() = app.shopkeep.integrations.PushSnapshot(
     title = title,
     description = description,
@@ -495,8 +501,11 @@ class ListingRepository(private val products: ProductRepository) {
             configurations = configs,
         ).let { l ->
             val snap = row[ListingsTable.pushedSnapshot]
+            val archivedIds = app.shopkeep.inventory.MaterialsTable.selectAll()
+                .where { app.shopkeep.inventory.MaterialsTable.archivedAt.isNotNull() }
+                .map { it[app.shopkeep.inventory.MaterialsTable.id] }.toSet()
             l.copy(
-                pendingPush = snap != null && snap != l.input.pushShape(),
+                pendingPush = snap != null && snap != l.input.pushShapeActive(archivedIds),
                 syncCheckedAt = row[ListingsTable.syncCheckedAt]?.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             )
         }

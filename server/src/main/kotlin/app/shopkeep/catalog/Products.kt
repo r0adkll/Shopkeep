@@ -329,9 +329,11 @@ class ProductRepository(private val materials: MaterialRepository) {
     private fun enumerate(p: Product, stock: Map<Long, Material>): List<Configuration> {
         val choiceSlots = p.slots.withIndex().filter { it.value.kind == SlotKind.CHOICE }
         // Cartesian product of choice palettes, capped defensively.
+        // Archived materials are excluded everywhere (archived = removed).
+        fun active(ids: List<Long>) = ids.filter { stock[it]?.archived != true }
         var combos = listOf(emptyMap<Int, Long>())
         for ((idx, slot) in choiceSlots) {
-            combos = combos.flatMap { base -> slot.optionMaterialIds.map { base + (idx to it) } }
+            combos = combos.flatMap { base -> active(slot.optionMaterialIds).map { base + (idx to it) } }
             if (combos.size > 2000) return emptyList()
         }
         val codes = skuCodes(p, stock)
@@ -345,7 +347,9 @@ class ProductRepository(private val materials: MaterialRepository) {
      */
     private fun skuCodes(p: Product, stock: Map<Long, Material>): Map<Int, Map<Long, String>> =
         p.slots.withIndex().filter { it.value.kind == SlotKind.CHOICE }.associate { (idx, slot) ->
-            idx to distinctCodes(slot.optionMaterialIds.associateWith { stock[it]?.name ?: "?" })
+            idx to distinctCodes(
+                slot.optionMaterialIds.filter { stock[it]?.archived != true }.associateWith { stock[it]?.name ?: "?" },
+            )
         }
 
     /** Codes must be unique within the slot. Iteratively strip tokens shared by

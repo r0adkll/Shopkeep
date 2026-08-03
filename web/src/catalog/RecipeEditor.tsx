@@ -48,8 +48,10 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
   const comboCount = useMemo(() => {
     const choice = p.slots.filter((s) => s.kind === "CHOICE");
     if (choice.length === 0) return 0;
-    return choice.reduce((n, s) => n * s.optionMaterialIds.length, 1);
-  }, [p.slots]);
+    // archived = removed: excluded from every computation
+    const activeCount = (ids: number[]) => ids.filter((id) => byId.get(id) && !byId.get(id)!.archived).length;
+    return choice.reduce((n, s) => n * activeCount(s.optionMaterialIds), 1);
+  }, [p.slots, byId]);
   const coverageWarnings = useMemo(() => {
     const warnings: string[] = [];
     p.slots.forEach((slot, idx) => {
@@ -122,7 +124,7 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
         const mats =
           s.kind === "FIXED"
             ? [s.fixedMaterialId != null ? byId.get(s.fixedMaterialId) : undefined]
-            : s.optionMaterialIds.map((id) => byId.get(id));
+            : s.optionMaterialIds.map((id) => byId.get(id)).filter((m) => m && !m.archived);
         const costs = mats.filter(Boolean).map((m) => Math.round(s.quantity * perUnit(m)));
         const unit = mats.find(Boolean)?.unit ?? "";
         return {
@@ -618,7 +620,9 @@ function SlotCard({
                   key={m.id}
                   type="button"
                   onClick={() => toggleOption(m.id)}
+                  title={m.archived ? "archived — excluded from configurations; click to remove the reference" : undefined}
                   className={`flex items-center gap-1.5 rounded-full border py-0.5 pr-2.5 pl-1.5 text-xs ${
+                    m.archived ? "border-dashed border-crit/50 text-mut line-through" :
                     on ? "border-accent font-semibold text-ink" : "border-line text-ink2 opacity-60 hover:opacity-100"
                   }`}
                 >
@@ -721,7 +725,7 @@ function RuleComposer({
             <option value="stock">stock</option>
           </select>
           {(() => {
-            const opts = (whenSlot?.optionMaterialIds ?? []).map((id) => byId.get(id)).filter((m): m is Material => !!m);
+            const opts = (whenSlot?.optionMaterialIds ?? []).map((id) => byId.get(id)).filter((m): m is Material => !!m && !m.archived);
             const shown = opts.filter((m) => matchesQuery(m, q));
             const sel = shown.filter((m) => r.whenMaterialIds.includes(m.id)).length;
             return (
@@ -766,7 +770,7 @@ function RuleComposer({
       <>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {sortMaterials(
-          (whenSlot?.optionMaterialIds ?? []).map((id) => byId.get(id)).filter((m): m is Material => !!m && matchesQuery(m, q)),
+          (whenSlot?.optionMaterialIds ?? []).map((id) => byId.get(id)).filter((m): m is Material => !!m && !m.archived && matchesQuery(m, q)),
           sortK,
         ).map((m) => {
           const id = m.id;
@@ -847,7 +851,7 @@ function MapGrid({
 }) {
   const source = p.slots[sourceIdx];
   const target = p.slots[targetIdx];
-  const targetIds = target?.optionMaterialIds ?? [];
+  const targetIds = (target?.optionMaterialIds ?? []).filter((id) => !byId.get(id)?.archived);
 
   const STOP = new Set(["pla", "tpu", "petg", "abs", "basic", "matte", "silk", "translucent", "transparent", "hs"]);
   const tokens = (name: string) => name.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 2 && !STOP.has(t));
@@ -889,6 +893,7 @@ function MapGrid({
       }
     });
     for (const srcId of source?.optionMaterialIds ?? []) {
+      if (byId.get(srcId)?.archived) continue; // archived = removed
       m.set(srcId, existing.get(srcId) ?? suggest(srcId));
     }
     return m;

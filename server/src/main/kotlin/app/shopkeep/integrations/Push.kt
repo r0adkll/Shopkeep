@@ -5,6 +5,7 @@ import app.shopkeep.auth.requireAdmin
 import app.shopkeep.db.dbQuery
 import app.shopkeep.listings.ListingRepository
 import app.shopkeep.listings.pushShape
+import app.shopkeep.listings.pushShapeActive
 import app.shopkeep.listings.ListingsTable
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
@@ -81,10 +82,16 @@ class PushService(
 ) {
     private suspend fun connectionId(): Long? = connections.connectedIds().firstOrNull()
 
-    /** The desired platform shape derived from the canonical listing. */
+    private suspend fun archivedIds(): Set<Long> = dbQuery {
+        app.shopkeep.inventory.MaterialsTable.selectAll()
+            .where { app.shopkeep.inventory.MaterialsTable.archivedAt.isNotNull() }
+            .map { it[app.shopkeep.inventory.MaterialsTable.id] }.toSet()
+    }
+
+    /** The desired platform shape — archived-material values excluded. */
     private suspend fun desired(listingId: Long): Pair<PushSnapshot, app.shopkeep.listings.Listing>? {
         val l = listings.get(listingId) ?: return null
-        return l.input.pushShape() to l
+        return l.input.pushShapeActive(archivedIds()) to l
     }
 
     /** Background drift check: one shop-listings fetch covers every linked
@@ -193,7 +200,8 @@ class PushService(
         // listing's current one (processing profile readiness state).
         val readinessStateId = connections.fetchListing(connId, etsyId)
             ?.inventory?.products?.firstOrNull()?.offerings?.firstOrNull()?.readinessStateId
-        val axes = l.input.axes.map { ax -> ax to ax.values.filter { it.offered } }
+        val dead = archivedIds()
+        val axes = l.input.axes.map { ax -> ax to ax.values.filter { it.offered && (it.materialId == null || it.materialId !in dead) } }
         if (axes.isNotEmpty()) {
             var combos = listOf(listOf<Pair<Int, app.shopkeep.listings.AxisValueInput>>())
             axes.forEachIndexed { ai, (_, vals) ->
