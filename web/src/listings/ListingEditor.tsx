@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ExternalLink, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, ImageDown, Plus, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PushReview } from "./PushReview";
 import { formatQty, inventoryApi, materialColor, type Material } from "../inventory/api";
