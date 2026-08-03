@@ -80,7 +80,7 @@ export function ListingEditor({
     queryKey: ["variants", product.id],
     queryFn: async () => {
       const r = await fetch(`/api/v1/catalog/products/${product.id}/variants`);
-      return (await r.json()) as { id: number; name: string }[];
+      return (await r.json()) as { id: number; name: string; adjustments: { slotDeltas: { slotPosition: number; deltaQty: number | null; removed: boolean }[]; extras: { materialId: number; quantity: number }[] } }[];
     },
   });
   const productConfigs = useQuery({
@@ -106,6 +106,95 @@ export function ListingEditor({
   });
 
   const mat = (id: number | null | undefined) => (id == null ? undefined : byId.get(id));
+
+  /* Combinations preview for non-material listings: cartesian product of
+   * offered values; BOM applies the design (with any override-set value in
+   * the combo) plus variant slot-deltas/extras. */
+  const comboRows = useMemo(() => {
+    if (!l.axes.some((a) => (a.valueSource ?? "materials") !== "materials")) return [];
+    const axesVals = l.axes.map((a) => a.values.filter((v) => v.offered));
+    if (axesVals.some((vs) => vs.length === 0)) return [];
+    const combos: (typeof axesVals)[number][] = axesVals.reduce<(typeof axesVals)[number][]>(
+      (acc, vs) => acc.flatMap((c) => vs.map((v) => [...c, v])),
+      [[]],
+    );
+    return combos.slice(0, 400).map((combo) => {
+      const labels = combo.map((v, k) => {
+        const a = l.axes[k];
+        const src =
+          v.designId != null ? (pDesigns.data ?? []).find((d) => d.id === v.designId)?.name
+          : v.variantId != null ? (pVariants.data ?? []).find((d) => d.id === v.variantId)?.name
+          : v.overrideKey != null ? (v.overrideKey === "base" ? "Standard" : v.overrideKey)
+          : mat(v.materialId)?.name;
+        void a;
+        return v.displayLabel || src || "?";
+      });
+      const overrideKey = combo.find((v) => v.overrideKey && v.overrideKey !== "base")?.overrideKey ?? null;
+      const dv = combo.find((v) => v.designId != null);
+      const design = dv ? (pDesigns.data ?? []).find((d) => d.id === dv.designId) : undefined;
+      const assignments = design
+        ? (overrideKey && design.overrideSets.find((o) => o.key.toLowerCase() === overrideKey.toLowerCase())
+            ? (design.overrideSets.find((o) => o.key.toLowerCase() === overrideKey.toLowerCase()) as unknown as { assignments: typeof design.assignments }).assignments ?? design.assignments
+            : design.assignments)
+        : [];
+      let cost = 0;
+      let buildable = Infinity;
+      const perMat: { id: number; qty: number }[] = [];
+      assignments.forEach((asg) => {
+        const qty = asg.qtyOverride ?? product.slots[asg.slotPosition]?.quantity ?? 0;
+        if (qty > 0) perMat.push({ id: asg.materialId, qty });
+      });
+      combo.forEach((v, k) => {
+        if (v.materialId != null && (l.axes[k].valueSource ?? "materials") === "materials") {
+          const qty = product.slots[l.axes[k].productSlotPosition]?.quantity ?? 0;
+          if (qty > 0) perMat.push({ id: v.materialId, qty });
+        }
+      });
+      const variant = combo.find((v) => v.variantId != null);
+      const vAdj = variant ? (pVariants.data ?? []).find((d) => d.id === variant.variantId)?.adjustments : undefined;
+      vAdj?.slotDeltas.forEach((d) => {
+        const asg = assignments.find((a) => a.slotPosition === d.slotPosition);
+        const target = asg?.materialId ?? product.slots[d.slotPosition]?.fixedMaterialId ?? null;
+        const hit = target != null ? perMat.find((p) => p.id === target) : undefined;
+        if (hit) {
+          if (d.removed) hit.qty = 0;
+          else if (d.deltaQty != null) hit.qty = Math.max(0, hit.qty + d.deltaQty);
+        }
+      });
+      vAdj?.extras.forEach((e) => perMat.push({ id: e.materialId, qty: e.quantity }));
+      perMat.forEach((p) => {
+        const m = byId.get(p.id);
+        if (m && p.qty > 0) {
+          cost += (p.qty * m.costMinor) / (m.costQuantity || 1);
+          buildable = Math.min(buildable, Math.floor(m.stock.available / p.qty));
+        }
+      });
+      const designCol = combo.findIndex((v) => v.designId != null);
+      const dots = design ? (
+        <span>
+          {assignments.map((asg, k) => {
+            const m = byId.get(asg.materialId);
+            return (
+              <span key={k} className="mr-0.5 inline-block rounded-full border border-line align-[-1px]"
+                style={{ width: k ? 9 : 13, height: k ? 9 : 13, background: m ? (materialColor(m) ?? "var(--color-panel2)") : undefined }} />
+            );
+          })}
+        </span>
+      ) : null;
+      const codes = labels.map((lb) => lb.replace(/[^A-Za-z0-9]/g, "").slice(0, 4).toUpperCase() || "X");
+      return {
+        key: labels.join("|"),
+        labels,
+        designCol,
+        dots,
+        cost,
+        buildable: buildable === Infinity ? 0 : buildable,
+        suggestedSku: `${l.listingSku || product.skuPrefix || "SKU"}-${codes.join("-")}`,
+        primarySku: combo[0]?.platformSku ?? null,
+      };
+    });
+  }, [l.axes, l.listingSku, pDesigns.data, pVariants.data, byId, product]);
+
   const offeredCount = l.axes.map((a) => a.values.filter((v) => v.offered).length);
   const laborMinor = Math.round(((laborRate.data?.rateMinor ?? 0) * product.laborMinutes) / 60);
 
@@ -400,52 +489,62 @@ export function ListingEditor({
         {l.axes.some((a) => (a.valueSource ?? "materials") !== "materials") ? (
           <>
             <SectionTitle>
-              Designs preview
-              <Hint>listing-level SKU — BOM resolves from the chosen design at order time; no per-combo SKU table</Hint>
+              Combinations <span className="font-mono font-normal text-mut">{comboRows.length}</span>
+              <Hint>
+                {l.skuMode === "per_combination"
+                  ? "one SKU per combination — edit below"
+                  : l.skuMode === "per_primary"
+                    ? "SKU varies on the primary axis (edit on its value rows above)"
+                    : "one SKU for the whole listing — BOM resolves per combination at order time"}
+              </Hint>
             </SectionTitle>
             <div className="overflow-x-auto rounded-xl border border-line bg-panel shadow-sm">
-              <table className="w-full min-w-[480px] border-collapse text-[13px]">
+              <table className="w-full min-w-[520px] border-collapse text-[13px]">
                 <thead>
                   <tr className="text-left text-[10px] tracking-widest text-mut uppercase">
-                    <th className="border-b border-line px-3 py-2">Value</th>
-                    <th className="border-b border-line px-3 py-2">Palette</th>
+                    {l.axes.map((a) => (
+                      <th key={a.displayName} className="border-b border-line px-3 py-2">{a.displayName}</th>
+                    ))}
+                    <th className="border-b border-line px-3 py-2">SKU</th>
                     <th className="border-b border-line px-3 py-2">BOM</th>
                     <th className="border-b border-line px-3 py-2">Buildable</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {l.axes
-                    .filter((a) => a.valueSource === "designs")
-                    .flatMap((a) => a.values.filter((v) => v.offered && v.designId != null))
-                    .map((v, i) => {
-                      const d = (pDesigns.data ?? []).find((x) => x.id === v.designId);
-                      if (!d) return null;
-                      let cost = 0;
-                      let buildable = Infinity;
-                      const dots = d.assignments.map((asg, k) => {
-                        const m = byId.get(asg.materialId);
-                        const qty = asg.qtyOverride ?? product.slots[asg.slotPosition]?.quantity ?? 0;
-                        if (m && qty > 0) {
-                          cost += (qty * m.costMinor) / (m.costQuantity || 1);
-                          buildable = Math.min(buildable, Math.floor(m.stock.available / qty));
-                        }
-                        return (
-                          <span key={k} className="mr-0.5 inline-block rounded-full border border-line align-[-1px]"
-                            style={{ width: k ? 9 : 13, height: k ? 9 : 13, background: m ? (materialColor(m) ?? "var(--color-panel2)") : undefined }} />
-                        );
-                      });
-                      const b = buildable === Infinity ? 0 : buildable;
-                      return (
-                        <tr key={i}>
-                          <td className="border-b border-line/40 px-3 py-1.5 font-semibold">{v.displayLabel || d.name}</td>
-                          <td className="border-b border-line/40 px-3 py-1.5">{dots}<span className="ml-1 text-xs text-ink2">{d.name}</span></td>
-                          <td className="border-b border-line/40 px-3 py-1.5 font-mono">{money(Math.round(cost))}</td>
-                          <td className={`border-b border-line/40 px-3 py-1.5 font-mono font-bold ${b < 3 ? "text-crit" : b < 8 ? "text-warn" : "text-good"}`}>{b}</td>
-                        </tr>
-                      );
-                    })}
-                  {l.axes.filter((a) => a.valueSource === "designs").length === 0 && (
-                    <tr><td className="px-3 py-3 text-mut" colSpan={4}>No design axis — variant/override axes adjust the build; the BOM comes from the design or material axis at order time.</td></tr>
+                  {comboRows.map((row, i) => (
+                    <tr key={i}>
+                      {row.labels.map((lb, k) => (
+                        <td key={k} className="border-b border-line/40 px-3 py-1.5">
+                          {k === row.designCol ? (
+                            <span>{row.dots}<span className="ml-1 font-semibold">{lb}</span></span>
+                          ) : (
+                            lb
+                          )}
+                        </td>
+                      ))}
+                      <td className="border-b border-line/40 px-3 py-1.5 font-mono">
+                        {l.skuMode === "per_combination" ? (
+                          <input
+                            value={l.comboSkus?.find((c) => c.values.join("|") === row.key)?.sku ?? ""}
+                            placeholder={row.suggestedSku}
+                            onChange={(e) => {
+                              const others = (l.comboSkus ?? []).filter((c) => c.values.join("|") !== row.key);
+                              set({ comboSkus: e.target.value ? [...others, { values: row.key.split("|"), sku: e.target.value }] : others });
+                            }}
+                            className="w-40 rounded border border-line bg-panel2 px-2 py-0.5 font-mono text-xs"
+                          />
+                        ) : l.skuMode === "listing_level" ? (
+                          <span className="text-mut">{l.listingSku || "listing SKU"}</span>
+                        ) : (
+                          <span className="text-mut">{row.primarySku ?? "—"}</span>
+                        )}
+                      </td>
+                      <td className="border-b border-line/40 px-3 py-1.5 font-mono">{money(Math.round(row.cost))}</td>
+                      <td className={`border-b border-line/40 px-3 py-1.5 font-mono font-bold ${row.buildable < 3 ? "text-crit" : row.buildable < 8 ? "text-warn" : "text-good"}`}>{row.buildable}</td>
+                    </tr>
+                  ))}
+                  {comboRows.length === 0 && (
+                    <tr><td className="px-3 py-3 text-mut" colSpan={l.axes.length + 3}>Offer at least one value per axis.</td></tr>
                   )}
                 </tbody>
               </table>

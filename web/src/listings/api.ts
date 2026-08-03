@@ -40,6 +40,7 @@ export type ListingInput = {
   quantity: number;
   skuMode: "per_combination" | "per_primary" | "listing_level";
   listingSku?: string | null;
+  comboSkus?: { values: string[]; sku: string }[];
   packagingProfileId: number | null;
   tags: string[];
   materialsList: string[];

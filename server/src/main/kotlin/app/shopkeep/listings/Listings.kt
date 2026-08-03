@@ -69,6 +69,7 @@ object ListingsTable : Table("listings") {
     val archivedAt = timestampWithTimeZone("archived_at").nullable()
     val valueResolutions = jsonb<List<ValueResolution>>("value_resolutions", Json.Default)
     val listingSku = text("listing_sku").nullable()
+    val comboSkus = jsonb<List<ComboSku>>("combo_skus", Json.Default)
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -135,6 +136,9 @@ data class Personalization(
 )
 
 @Serializable
+data class ComboSku(val values: List<String>, val sku: String)
+
+@Serializable
 data class ValueResolution(
     val axis: String,
     val value: String,
@@ -182,6 +186,7 @@ data class ListingInput(
     val disabledSkus: List<String> = emptyList(),
     val valueResolutions: List<ValueResolution> = emptyList(),
     val listingSku: String? = null,
+    val comboSkus: List<ComboSku> = emptyList(),
 )
 
 @Serializable
@@ -392,6 +397,7 @@ class ListingRepository(private val products: ProductRepository) {
     private fun ListingsTable.write(it: org.jetbrains.exposed.sql.statements.UpdateBuilder<*>, input: ListingInput) {
         it[valueResolutions] = input.valueResolutions
         it[listingSku] = input.listingSku
+        it[comboSkus] = input.comboSkus
         it[productId] = input.productId
         it[title] = input.title.trim()
         it[description] = input.description
@@ -444,6 +450,7 @@ class ListingRepository(private val products: ProductRepository) {
             input = ListingInput(
                 valueResolutions = row[ListingsTable.valueResolutions],
                 listingSku = row[ListingsTable.listingSku],
+                comboSkus = row[ListingsTable.comboSkus],
                 productId = row[ListingsTable.productId],
                 title = row[ListingsTable.title],
                 description = row[ListingsTable.description],
