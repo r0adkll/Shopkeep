@@ -9,6 +9,7 @@ import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
@@ -72,6 +73,13 @@ fun Route.inventoryRoutes(materials: MaterialRepository) {
             }
             materials.update(id, call.receive<MaterialInput>())
             call.respond(materials.get(id)!!)
+        }
+
+        delete("/inventory/materials/{id}") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            val err = id?.let { materials.delete(it) } ?: "Material not found."
+            if (err == null) call.respond(HttpStatusCode.NoContent)
+            else call.respond(HttpStatusCode.Conflict, ApiError(err))
         }
 
         post("/inventory/materials/{id}/archive") {

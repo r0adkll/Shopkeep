@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatCost, formatQty, inventoryApi, materialColor, type TxnKind } from "./api";
-import { X } from "lucide-react";
+import { Archive, ArchiveRestore, Trash2, X } from "lucide-react";
 import { MaterialIcon } from "./MaterialIcon";
 import { Button, ErrorText, Field } from "../ui";
 
@@ -18,6 +18,24 @@ export function MaterialDetailDrawer({
 }) {
   const queryClient = useQueryClient();
   const detail = useQuery({ queryKey: ["material", id], queryFn: () => inventoryApi.material(id) });
+  const qc = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const archiveMut = useMutation({
+    mutationFn: (archived: boolean) => inventoryApi.setArchived(id, archived),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["materials"] });
+      qc.invalidateQueries({ queryKey: ["material", id] });
+    },
+  });
+  const deleteMut = useMutation({
+    mutationFn: () => inventoryApi.deleteMaterial(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["materials"] });
+      onClose();
+    },
+    onError: (e) => setRemoveError(e instanceof Error ? e.message.replace(/^\d+\s*/, "") : "Delete failed."),
+  });
 
   const [delta, setDelta] = useState("");
   const [kind, setKind] = useState<TxnKind>("PURCHASE");
@@ -157,6 +175,39 @@ export function MaterialDetailDrawer({
           ))}
           {ledger.length === 0 && <li className="py-2 text-mut">No ledger entries yet.</li>}
         </ul>
+
+        {/* remove: archive hides from active views (history kept); delete only
+            works when nothing references the material */}
+        <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-line pt-4">
+          <button
+            type="button"
+            onClick={() => archiveMut.mutate(!m.archived)}
+            disabled={archiveMut.isPending}
+            className="flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-sm text-ink2 hover:border-accent hover:text-ink"
+          >
+            {m.archived ? <><ArchiveRestore size={14} /> Unarchive</> : <><Archive size={14} /> Archive</>}
+          </button>
+          {!confirmDelete ? (
+            <button
+              type="button"
+              onClick={() => { setConfirmDelete(true); setRemoveError(null); }}
+              className="flex items-center gap-1.5 rounded-md border border-crit/40 px-3 py-1.5 text-sm text-crit hover:border-crit hover:bg-crit/10"
+            >
+              <Trash2 size={14} /> Delete…
+            </button>
+          ) : (
+            <span className="flex items-center gap-2 rounded-lg border border-crit/40 bg-crit/5 px-3 py-1.5">
+              <span className="text-xs font-semibold text-crit">Permanently delete {m.name}?</span>
+              <button type="button" onClick={() => deleteMut.mutate()} disabled={deleteMut.isPending}
+                className="rounded-md bg-crit px-2.5 py-1 text-xs font-bold text-white">
+                {deleteMut.isPending ? "Deleting…" : "Delete"}
+              </button>
+              <button type="button" onClick={() => setConfirmDelete(false)} className="text-xs text-ink2 hover:text-ink">cancel</button>
+            </span>
+          )}
+          {m.archived && <span className="rounded-full bg-line/60 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-mut">ARCHIVED</span>}
+          {removeError && <span className="text-xs font-medium text-crit">{removeError}</span>}
+        </div>
       </div>
     </div>
   );

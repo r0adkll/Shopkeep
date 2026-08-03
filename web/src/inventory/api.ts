@@ -57,6 +57,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const inventoryApi = {
   materials: () => req<Material[]>("/materials"),
+  materialsAll: () => req<Material[]>("/materials?includeArchived=true"),
+  setArchived: (id: number, archived: boolean) =>
+    req<Material>(`/materials/${id}/archive`, { method: "POST", body: JSON.stringify({ archived }) }),
+  deleteMaterial: (id: number) => req<void>(`/materials/${id}`, { method: "DELETE" }),
   material: (id: number) => req<MaterialDetail>(`/materials/${id}`),
   create: (material: MaterialInput, initialQuantity?: number) =>
     req<Material>("/materials", {

@@ -29,9 +29,10 @@ export function DashboardPage() {
     queryFn: api.me,
     enabled: setup.data?.needsSetup === false,
   });
+  const [showArchived, setShowArchived] = useState(false);
   const materials = useQuery({
-    queryKey: ["materials"],
-    queryFn: inventoryApi.materials,
+    queryKey: ["materials", showArchived],
+    queryFn: showArchived ? inventoryApi.materialsAll : inventoryApi.materials,
     enabled: !!me.data,
   });
 
@@ -159,6 +160,14 @@ export function DashboardPage() {
             className={`rounded-full border px-3 py-1 text-sm ${attentionOnly ? "border-warn bg-warn/10 font-semibold text-warn" : "border-line text-ink2 hover:border-warn"}`}
           >
             Needs attention
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowArchived(!showArchived)}
+            aria-pressed={showArchived}
+            className={`rounded-full border px-3 py-1 text-sm ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}
+          >
+            archived
           </button>
           <label className="ml-auto flex items-center gap-2 text-xs text-mut">
             Sort

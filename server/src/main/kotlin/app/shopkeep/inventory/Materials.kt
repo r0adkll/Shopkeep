@@ -12,6 +12,8 @@ import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
 import org.jetbrains.exposed.sql.json.jsonb
+import org.jetbrains.exposed.sql.deleteWhere
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.sum
 import org.jetbrains.exposed.sql.update
@@ -137,6 +139,37 @@ class MaterialRepository {
 
     suspend fun update(id: Long, input: MaterialInput): Boolean = dbQuery {
         MaterialsTable.update({ MaterialsTable.id eq id }) { apply(it, input) } > 0
+    }
+
+    /** Hard delete, only when nothing references the material. Returns an
+     *  error sentence naming the blocker, or null on success. */
+    suspend fun delete(id: Long): String? = dbQuery {
+        if (MaterialsTable.selectAll().where { MaterialsTable.id eq id }.none()) return@dbQuery "Material not found."
+        if (InventoryTransactionsTable.selectAll().where { InventoryTransactionsTable.materialId eq id }.any())
+            return@dbQuery "Has ledger history — archive instead (history is never deleted)."
+        val inSlots = app.shopkeep.catalog.ProductSlotsTable.selectAll().where {
+            (app.shopkeep.catalog.ProductSlotsTable.fixedMaterialId eq id) or
+                (app.shopkeep.catalog.ProductSlotsTable.defaultMaterialId eq id)
+        }.any() || app.shopkeep.catalog.ProductSlotOptionsTable.selectAll()
+            .where { app.shopkeep.catalog.ProductSlotOptionsTable.materialId eq id }.any()
+        if (inSlots) return@dbQuery "Used by a product recipe — remove it there first, or archive."
+        if (app.shopkeep.listings.ListingAxisValuesTable.selectAll()
+                .where { app.shopkeep.listings.ListingAxisValuesTable.materialId eq id }.any()
+        ) return@dbQuery "Used by a listing axis — remove it there first, or archive."
+        if (app.shopkeep.listings.ListingExtraMaterialsTable.selectAll()
+                .where { app.shopkeep.listings.ListingExtraMaterialsTable.materialId eq id }.any()
+        ) return@dbQuery "Used as a listing extra — remove it there first, or archive."
+        val inDesigns = app.shopkeep.catalog.ProductDesignsTable.selectAll().any { row ->
+            row[app.shopkeep.catalog.ProductDesignsTable.assignments].any { it.materialId == id } ||
+                row[app.shopkeep.catalog.ProductDesignsTable.overrideSets].any { os -> os.assignments.any { it.materialId == id } }
+        }
+        if (inDesigns) return@dbQuery "Used by a product design — remove it there first, or archive."
+        val inVariants = app.shopkeep.catalog.ProductVariantsTable.selectAll().any { row ->
+            row[app.shopkeep.catalog.ProductVariantsTable.adjustments].extras.any { it.materialId == id }
+        }
+        if (inVariants) return@dbQuery "Used by a product variant — remove it there first, or archive."
+        MaterialsTable.deleteWhere { MaterialsTable.id eq id }
+        null
     }
 
     suspend fun setArchived(id: Long, archived: Boolean): Boolean = dbQuery {
