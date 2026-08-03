@@ -93,18 +93,36 @@ export function ListingEditor({
   const [l, setL] = useState<ListingInput>(existing?.input ?? defaultInput(product, byId));
   const [reviewing, setReviewing] = useState(false);
   const [priceStr, setPriceStr] = useState(existing ? (existing.input.basePriceMinor / 100).toFixed(2) : "");
+  const [savedBaseline, setSavedBaseline] = useState(() => JSON.stringify(existing?.input ?? null));
   const [editingProfile, setEditingProfile] = useState(false);
   const set = (patch: Partial<ListingInput>) => setL((prev) => ({ ...prev, ...patch }));
 
+  const currentInput = () => ({ ...l, basePriceMinor: Math.round(parseFloat(priceStr || "0") * 100) });
+  const dirty = !existing || JSON.stringify(currentInput()) !== savedBaseline;
+
   const save = useMutation({
     mutationFn: () => {
-      const input = { ...l, basePriceMinor: Math.round(parseFloat(priceStr || "0") * 100) };
+      const input = currentInput();
       return existing ? listingsApi.update(existing.id, input) : listingsApi.create(input);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["listings"] });
-      onClose();
+      queryClient.invalidateQueries({ queryKey: ["push-preview"] });
+      if (existing) setSavedBaseline(JSON.stringify(currentInput()));
+      else onClose(); // creation returns to the list; edits stay in place
     },
+  });
+
+  // Live "changes to sync" signal — only meaningful against SAVED state.
+  const pushPreview = useQuery({
+    queryKey: ["push-preview", existing?.id],
+    queryFn: async () => {
+      const r = await fetch(`/api/v1/listings/${existing!.id}/push-preview`);
+      if (!r.ok) throw new Error(await r.text());
+      return (await r.json()) as { changes: unknown[]; driftCount: number; canPush: boolean; blockedReason: string | null };
+    },
+    enabled: !!existing?.etsyListingId && !dirty,
+    staleTime: 60_000,
   });
 
   const mat = (id: number | null | undefined) => (id == null ? undefined : byId.get(id));
@@ -719,31 +737,51 @@ export function ListingEditor({
           <div className="text-[10.5px] tracking-widest uppercase text-mut">Platforms</div>
           <div className="mt-1.5 flex items-center gap-2 text-sm">
             <span className="font-semibold">Etsy</span>
-            <span className="rounded-full bg-line/60 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-mut">
-              {existing ? existing.syncState.replace("_", " ").toUpperCase() : "NOT PUBLISHED"}
-            </span>
+            {existing?.etsyListingId ? (
+              <>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider ${
+                  dirty || (pushPreview.data?.changes.length ?? 0) > 0 ? "bg-warn/10 text-warn" : existing.syncState === "in_sync" ? "bg-good/10 text-good" : "bg-line/60 text-mut"
+                }`}>
+                  {dirty ? "UNSAVED EDITS" : pushPreview.isLoading ? "CHECKING…" : (pushPreview.data?.changes.length ?? 0) > 0 ? `${pushPreview.data!.changes.length} TO PUSH` : "IN SYNC"}
+                </span>
+                <span className="font-mono text-[11px] text-mut">#{existing.etsyListingId}</span>
+              </>
+            ) : (
+              <span className="rounded-full bg-line/60 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-mut">NOT LINKED</span>
+            )}
           </div>
-          <div className="mt-1 text-[11px] text-mut">Review &amp; push lands with Phase 3's OAuth connect.</div>
+          {existing?.etsyListingId && (
+            <>
+              {(pushPreview.data?.driftCount ?? 0) > 0 && !dirty && (
+                <div className="mt-1 text-[11px] font-semibold text-warn">▲ {pushPreview.data!.driftCount} field(s) changed on Etsy since last sync</div>
+              )}
+              <button
+                type="button"
+                onClick={() => setReviewing(true)}
+                disabled={dirty}
+                title={dirty ? "save your edits first — the review diffs saved state" : "diff against the live Etsy listing"}
+                className="mt-2 w-full rounded-md border border-accent px-3 py-1.5 text-sm font-semibold text-accent hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {dirty ? "Save first, then review & push" : "Review & push to Etsy…"}
+              </button>
+            </>
+          )}
+          {existing && !existing.etsyListingId && (
+            <div className="mt-1 text-[11px] text-mut">Link by importing the Etsy listing, or create it on Etsy and import.</div>
+          )}
         </div>
         <ErrorText>{save.error?.message}</ErrorText>
-        <Button type="button" disabled={save.isPending || !l.title} onClick={() => save.mutate()}>
-          {save.isPending ? "Saving…" : existing ? "Save listing" : "Create listing"}
+        <Button type="button" disabled={save.isPending || !l.title || !dirty} onClick={() => save.mutate()}>
+          {save.isPending ? "Saving…" : !existing ? "Create listing" : dirty ? "Save listing" : "Saved ✓"}
         </Button>
-        {existing?.etsyListingId && (
-          <button
-            type="button"
-            onClick={() => setReviewing(true)}
-            className="mt-2 w-full rounded-md border border-accent px-4 py-2 font-semibold text-accent hover:bg-accent/5"
-            title="diff against the live Etsy listing — nothing pushes without review"
-          >
-            Review & push to Etsy…
-          </button>
-        )}
         {reviewing && existing && (
           <PushReview
             listingId={existing.id}
             onClose={() => setReviewing(false)}
-            onPushed={() => queryClient.invalidateQueries({ queryKey: ["listings"] })}
+            onPushed={() => {
+              queryClient.invalidateQueries({ queryKey: ["listings"] });
+              queryClient.invalidateQueries({ queryKey: ["push-preview"] });
+            }}
           />
         )}
         <button type="button" onClick={onClose} className="rounded-md border border-line px-4 py-2 text-sm text-ink2 hover:text-ink">

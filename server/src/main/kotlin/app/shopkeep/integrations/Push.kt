@@ -133,7 +133,16 @@ class PushService(
             changes += PushChange(section, name, old, new, if (drift) "drift" else "changed")
         }
         field("details", "Title", have.title, want.title, baseline?.title)
-        field("details", "Description", have.description.take(80), want.description.take(80), baseline?.description?.take(80))
+        // compare FULL text; truncate only for display
+        if (have.description != want.description) {
+            val drift = baseline != null && have.description != baseline.description
+            changes += PushChange(
+                "details", "Description",
+                have.description.take(80) + (if (have.description.length > 80) "…" else ""),
+                want.description.take(80) + (if (want.description.length > 80) "…" else ""),
+                if (drift) "drift" else "changed",
+            )
+        }
         field("details", "Price", "$" + "%.2f".format(have.priceMinor / 100.0), "$" + "%.2f".format(want.priceMinor / 100.0), baseline?.let { "$" + "%.2f".format(it.priceMinor / 100.0) })
         field("details", "Quantity", have.quantity.toString(), want.quantity.toString(), baseline?.quantity?.toString())
         field("details", "State", have.state, want.state, baseline?.state)
