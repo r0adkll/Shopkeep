@@ -212,13 +212,20 @@ class SyncService(
     private val listings: ListingRepository,
     private val lanes: LaneRepository,
     private val designs: app.shopkeep.catalog.DesignRepository,
+    private val push: PushService,
 ) {
     // One sync at a time: the background poller and a manual Sync-now racing
     // each other produced duplicate-key 500s on the first real ingest.
     private val syncMutex = Mutex()
 
-    suspend fun syncAll(): Map<Long, SyncResult> =
-        connections.connectedIds().associateWith { runCatching { syncConnection(it) }.getOrElse { SyncResult(0, 0, 0, 0) } }
+    suspend fun syncAll(): Map<Long, SyncResult> {
+        val results = connections.connectedIds().associateWith {
+            runCatching { syncConnection(it) }.getOrElse { SyncResult(0, 0, 0, 0) }
+        }
+        // Listing drift check rides the same poll cadence (one fetch per shop).
+        results.keys.forEach { runCatching { push.refreshSyncStates(it) } }
+        return results
+    }
 
     suspend fun syncConnection(connectionId: Long): SyncResult = syncMutex.withLock {
         syncConnectionLocked(connectionId)

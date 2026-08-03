@@ -4,6 +4,7 @@ import app.shopkeep.auth.ApiError
 import app.shopkeep.auth.requireAdmin
 import app.shopkeep.db.dbQuery
 import app.shopkeep.listings.ListingRepository
+import app.shopkeep.listings.pushShape
 import app.shopkeep.listings.ListingsTable
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
@@ -83,18 +84,32 @@ class PushService(
     /** The desired platform shape derived from the canonical listing. */
     private suspend fun desired(listingId: Long): Pair<PushSnapshot, app.shopkeep.listings.Listing>? {
         val l = listings.get(listingId) ?: return null
-        val variations = l.input.axes.associate { ax ->
-            ax.displayName to ax.values.filter { it.offered }.map { v -> v.displayLabel ?: v.platformValue ?: "?" }
+        return l.input.pushShape() to l
+    }
+
+    /** Background drift check: one shop-listings fetch covers every linked
+     *  listing; drift = Etsy differing from the last-pushed baseline. Runs
+     *  each poll cycle so list views read fresh state without ad-hoc fetches. */
+    suspend fun refreshSyncStates(connectionId: Long) {
+        val platform = connections.fetchShopListings(connectionId) ?: return
+        val byId = platform.associateBy { it.listingId.toString() }
+        val rows = dbQuery {
+            ListingsTable.selectAll().where { ListingsTable.etsyListingId.isNotNull() }.map {
+                Triple(it[ListingsTable.id], it[ListingsTable.etsyListingId]!!, it[ListingsTable.pushedSnapshot])
+            }
         }
-        return PushSnapshot(
-            title = l.input.title,
-            description = l.input.description,
-            tags = l.input.tags,
-            priceMinor = l.input.basePriceMinor,
-            quantity = l.input.quantity,
-            state = l.input.state,
-            variations = variations,
-        ) to l
+        val now = OffsetDateTime.now()
+        for ((id, etsyId, snapshot) in rows) {
+            val current = byId[etsyId] ?: continue
+            val drifted = snapshot != null && etsyShape(current) != snapshot
+            dbQuery {
+                ListingsTable.update({ ListingsTable.id eq id }) {
+                    it[syncState] = if (drifted) "drifted" else "in_sync"
+                    it[platformState] = current.state
+                    it[syncCheckedAt] = now
+                }
+            }
+        }
     }
 
     private fun etsyShape(e: EtsyShopListing): PushSnapshot {

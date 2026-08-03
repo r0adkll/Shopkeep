@@ -72,6 +72,7 @@ object ListingsTable : Table("listings") {
     val comboSkus = jsonb<List<ComboSku>>("combo_skus", Json.Default)
     val pushedSnapshot = jsonb<app.shopkeep.integrations.PushSnapshot>("pushed_snapshot", Json.Default).nullable()
     val lastPushError = text("last_push_error").nullable()
+    val syncCheckedAt = timestampWithTimeZone("sync_checked_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -140,6 +141,20 @@ data class Personalization(
 @Serializable
 data class ComboSku(val values: List<String>, val sku: String)
 
+/** The platform-facing shape of a listing — single source for push diffs,
+ *  pending-change detection, and the background drift check. */
+fun ListingInput.pushShape() = app.shopkeep.integrations.PushSnapshot(
+    title = title,
+    description = description,
+    tags = tags,
+    priceMinor = basePriceMinor,
+    quantity = quantity,
+    state = state,
+    variations = axes.associate { ax ->
+        ax.displayName to ax.values.filter { it.offered }.map { v -> v.displayLabel ?: v.platformValue ?: "?" }
+    },
+)
+
 @Serializable
 data class ValueResolution(
     val axis: String,
@@ -207,6 +222,8 @@ data class Listing(
     val etsyListingId: String?,
     val archived: Boolean,
     val configurations: List<ListingConfigurationRow>,
+    val pendingPush: Boolean = false, // canonical differs from last-pushed baseline
+    val syncCheckedAt: String? = null,
 )
 
 @Serializable
@@ -476,7 +493,13 @@ class ListingRepository(private val products: ProductRepository) {
             etsyListingId = row[ListingsTable.etsyListingId],
             archived = row[ListingsTable.archivedAt] != null,
             configurations = configs,
-        )
+        ).let { l ->
+            val snap = row[ListingsTable.pushedSnapshot]
+            l.copy(
+                pendingPush = snap != null && snap != l.input.pushShape(),
+                syncCheckedAt = row[ListingsTable.syncCheckedAt]?.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+            )
+        }
     }
 
     suspend fun list(includeArchived: Boolean = false): List<Listing> {

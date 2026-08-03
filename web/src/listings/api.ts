@@ -66,6 +66,8 @@ export type Listing = {
   etsyListingId: string | null;
   archived: boolean;
   configurations: ConfigurationRow[];
+  pendingPush: boolean;
+  syncCheckedAt: string | null;
 };
 
 export type Band = { minQty: number; maxQty?: number | null; kind: "stocked" | "adhoc"; materials: Extra[] };
