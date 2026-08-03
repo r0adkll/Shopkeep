@@ -243,7 +243,7 @@ export function ListingEditor({
           <div key={ai} className="mt-2 rounded-xl border border-line bg-panel p-4 shadow-sm">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-[10px] font-extrabold tracking-widest text-accent">
-                {ai === 0 ? "PRIMARY" : "SECONDARY"}
+                {["PRIMARY", "SECONDARY", "TERTIARY"][ai] ?? `AXIS ${ai + 1}`}
               </span>
               <input
                 value={axis.displayName}
@@ -252,29 +252,37 @@ export function ListingEditor({
                 }
                 className="w-40 border-b border-dashed border-line bg-transparent font-semibold outline-none focus:border-accent"
               />
-              <span className="text-xs text-mut">fills →</span>
-              <select
-                value={axis.productSlotPosition}
-                onChange={(e) => {
-                  const pos = Number(e.target.value);
-                  const tmpl = defaultInput(product, byId).axes.find((a) => a.productSlotPosition === pos);
-                  set({
-                    axes: l.axes.map((a, j) =>
-                      j === ai
-                        ? { ...a, productSlotPosition: pos, ...((a.valueSource ?? "materials") === "materials" ? { values: tmpl?.values ?? [] } : {}) }
-                        : a,
-                    ),
-                  });
-                }}
-                className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
-                title="which recipe slot this axis fills"
-              >
-                {product.slots.map((sl, si) =>
-                  sl.kind === "CHOICE" ? (
-                    <option key={si} value={si}>{sl.name} ({sl.quantity}{sl.optional ? ", optional" : ""})</option>
-                  ) : null,
-                )}
-              </select>
+              {(axis.valueSource ?? "materials") === "materials" ? (
+                <>
+                  <span className="text-xs text-mut">fills →</span>
+                  <select
+                    value={axis.productSlotPosition}
+                    onChange={(e) => {
+                      const pos = Number(e.target.value);
+                      const tmpl = defaultInput(product, byId).axes.find((a) => a.productSlotPosition === pos);
+                      set({
+                        axes: l.axes.map((a, j) =>
+                          j === ai ? { ...a, productSlotPosition: pos, values: tmpl?.values ?? [] } : a,
+                        ),
+                      });
+                    }}
+                    className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
+                    title="which recipe slot this axis fills"
+                  >
+                    {product.slots.map((sl, si) =>
+                      sl.kind === "CHOICE" ? (
+                        <option key={si} value={si}>{sl.name} ({sl.quantity}{sl.optional ? ", optional" : ""})</option>
+                      ) : null,
+                    )}
+                  </select>
+                </>
+              ) : (
+                <span className="text-xs text-mut">
+                  {axis.valueSource === "designs" && <>values are <b className="text-ink2">{product.name}</b>'s designs — edit them on the product's Designs tab</>}
+                  {axis.valueSource === "variants" && <>values are <b className="text-ink2">{product.name}</b>'s variants — edit them on the product's Variants tab</>}
+                  {axis.valueSource === "override_sets" && <>values bind to override sets defined on <b className="text-ink2">{product.name}</b>'s designs (e.g. editions)</>}
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => set({ axes: l.axes.filter((_, j) => j !== ai) })}
@@ -307,10 +315,10 @@ export function ListingEditor({
                 className="ml-auto rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
                 title="where this axis's values come from"
               >
-                <option value="materials">values: slot materials</option>
-                <option value="designs">values: designs (colorways)</option>
-                <option value="variants">values: variants (build styles)</option>
-                <option value="override_sets">values: design override sets</option>
+                <option value="materials">values: one material per choice (fills a recipe slot)</option>
+                <option value="designs">values: this product's designs (multi-color colorways)</option>
+                <option value="variants">values: this product's variants (Slim, Cable Winder…)</option>
+                <option value="override_sets">values: design override sets (editions)</option>
               </select>
             </div>
             <div className="mt-2 space-y-1">
