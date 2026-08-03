@@ -502,7 +502,7 @@ function SlotCard({
           type="button"
           onClick={onRemove}
           title="remove slot"
-          className="rounded-md border border-crit/40 p-1 text-crit opacity-0 transition-opacity group-hover:opacity-100 hover:border-crit hover:bg-crit/10"
+          className="rounded-md border border-crit/40 p-1 text-crit hover:border-crit hover:bg-crit/10"
         >
           <Trash2 size={13} />
         </button>
