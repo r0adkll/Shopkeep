@@ -5,7 +5,7 @@ import { ArrowLeft, Trash2 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { type Material, inventoryApi } from "../inventory/api";
 import { type ProductSummary, catalogApi } from "../catalog/api";
-import { NavTabs, Wordmark } from "../ui";
+import { NavTabs, Skeleton, Wordmark } from "../ui";
 
 /* Etsy import & mapping workspace per the locked concept (2026-08-02):
  * picker over live listings -> product + axis->slot link -> value grid with
@@ -126,7 +126,20 @@ export function ImportEtsyPage() {
             <Link to="/listings" className="ml-auto flex items-center gap-1 text-xs text-accent hover:underline"><ArrowLeft size={12} /> back to listings</Link>
           </div>
           {!conn && <p className="py-4 text-sm text-ink2">No connected Etsy shop.</p>}
-          {listings.isLoading && <p className="py-4 text-sm text-mut">Fetching listings from Etsy…</p>}
+          {listings.isLoading && (
+            <div aria-busy="true" aria-label="Fetching listings from Etsy">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="flex items-center gap-3 border-b border-line/60 py-3 last:border-0">
+                  <Skeleton className="h-4 flex-1 basis-64" />
+                  <Skeleton className="h-3 w-16" />
+                  <Skeleton className="h-3 w-40" />
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-7 w-20 rounded-lg" />
+                </div>
+              ))}
+              <p className="pt-3 text-center text-xs text-mut">Fetching your live listings from Etsy — this asks for active and draft listings with their full variation trees, usually a few seconds.</p>
+            </div>
+          )}
           {(listings.data ?? []).map((l) => {
             const prods = l.inventory?.products ?? [];
             const axes = new Map<string, Set<string>>();

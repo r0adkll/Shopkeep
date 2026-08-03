@@ -29,6 +29,7 @@ Self-hosted suite for managing a crafted-products business (inventory → produc
 
 - **Server:** Kotlin, Ktor, Metro DI, Exposed + Flyway + HikariCP, PostgreSQL (vault D1/D2)
 - **Web:** React + TypeScript + Vite + Tailwind + shadcn/ui + TanStack Query/Router, in `web/`, built to static files served by Ktor (D3/D4)
+- **UI practices:** follow [shadcn/ui](https://ui.shadcn.com) conventions when building UI. In particular: loading states are layout-mirroring `Skeleton` blocks (`web/src/ui.tsx`), never a bare "Loading…" line for content-shaped regions; mark loading containers `aria-busy`.
 - **Icons:** use `lucide-react` — never hand-generate vector icons or use emoji/text glyphs for UI chrome. Custom icons that Lucide can't cover (filament spool, material identities in `MaterialIcon.tsx`) are drawn to match Lucide's language: 24 grid, `stroke="currentColor"`, strokeWidth 2, round caps/joins.
 - **Layout:** `server/` (Ktor app), `web/` (SPA), `deploy/` (self-hoster compose + backup service), `.devcontainer/` (D15)
 - **Deploy:** two containers (app + postgres), images on ghcr.io, Flyway migrates on boot
