@@ -270,7 +270,7 @@ class PushService(
             "price" -> l.input.copy(basePriceMinor = cur.priceMinor)
             "quantity" -> l.input.copy(quantity = cur.quantity)
             "tags" -> l.input.copy(tags = cur.tags)
-            "state" -> l.input.copy(state = cur.state)
+            "state" -> l.input.copy(state = if (cur.state in setOf("draft", "active", "inactive")) cur.state else "inactive") // sold_out/expired have no canonical twin
             else -> return false
         }
         return listings.update(listingId, input)

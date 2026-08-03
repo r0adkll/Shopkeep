@@ -118,7 +118,8 @@ private fun validateListing(input: ListingInput): String? {
     if (input.title.isBlank()) return "Title is required."
     if (input.axes.size > 3) return "Platforms support at most 3 variation axes."
     if (input.state !in setOf("draft", "active", "inactive")) return "Invalid state."
-    if (input.skuMode !in setOf("per_combination", "per_primary")) return "Invalid SKU mode."
+    if (input.skuMode !in setOf("per_combination", "per_primary", "listing_level")) return "Invalid SKU mode."
+    if (input.axes.any { a -> a.valueSource !in setOf("materials", "designs", "variants", "override_sets") }) return "Invalid axis value source."
     if (input.extras.any { it.basis !in setOf("per_order", "per_unit") }) return "Extra basis must be per_order or per_unit."
     return null
 }
