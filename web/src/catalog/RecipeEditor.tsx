@@ -477,7 +477,11 @@ function SlotCard({
   onChange: (patch: Partial<Slot>) => void;
   onRemove: () => void;
 }) {
-  const [catFilter, setCatFilter] = useState<string>("filament");
+  // Remember the slot's world: default the category filter to whatever the
+  // slot already contains (a hardware rule slot reopens on hardware).
+  const [catFilter, setCatFilter] = useState<string>(
+    () => byId.get(slot.optionMaterialIds[0] ?? slot.fixedMaterialId ?? -1)?.category ?? "filament",
+  );
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("color");
   const categories = [...new Set(all.map((m) => m.category))];
@@ -630,6 +634,8 @@ function RuleComposer({
   onCancel: () => void;
 }) {
   const [r, setR] = useState<Rule>(state.rule);
+  const [q, setQ] = useState("");
+  const [sortK, setSortK] = useState<SortKey>("color");
   const whenSlot = p.slots[r.whenSlot];
   const thenSlot = p.slots[r.thenSlot];
   const claimed = new Set(
@@ -652,10 +658,56 @@ function RuleComposer({
           ))}
         </select>
         <span className="text-mut">is any of</span>
+        <span className="ml-auto flex items-center gap-2 text-[11px] text-mut">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="filter…"
+            className="w-28 rounded border border-line bg-panel2 px-2 py-0.5 text-[11px] outline-none placeholder:text-mut focus:border-accent"
+          />
+          <select value={sortK} onChange={(e) => setSortK(e.target.value as SortKey)} className="rounded border border-line bg-panel2 px-1.5 py-0.5 text-[11px]" title="Sort">
+            <option value="color">color</option>
+            <option value="name">name</option>
+            <option value="type">type</option>
+            <option value="stock">stock</option>
+          </select>
+          {(() => {
+            const opts = (whenSlot?.optionMaterialIds ?? []).map((id) => byId.get(id)).filter((m): m is Material => !!m);
+            const shown = opts.filter((m) => matchesQuery(m, q));
+            const sel = shown.filter((m) => r.whenMaterialIds.includes(m.id)).length;
+            return (
+              <>
+                <span className="font-mono">{sel}/{shown.length}</span>
+                <button
+                  type="button"
+                  disabled={sel === shown.length || shown.length === 0}
+                  onClick={() => setR({ ...r, whenMaterialIds: [...new Set([...r.whenMaterialIds, ...shown.map((m) => m.id)])] })}
+                  className="text-accent underline-offset-2 hover:underline disabled:text-mut disabled:no-underline"
+                >
+                  select all
+                </button>
+                <button
+                  type="button"
+                  disabled={sel === 0}
+                  onClick={() => {
+                    const ids = new Set(shown.map((m) => m.id));
+                    setR({ ...r, whenMaterialIds: r.whenMaterialIds.filter((x) => !ids.has(x)) });
+                  }}
+                  className="text-accent underline-offset-2 hover:underline disabled:text-mut disabled:no-underline"
+                >
+                  none
+                </button>
+              </>
+            );
+          })()}
+        </span>
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {(whenSlot?.optionMaterialIds ?? []).map((id) => {
-          const m = byId.get(id);
+        {sortMaterials(
+          (whenSlot?.optionMaterialIds ?? []).map((id) => byId.get(id)).filter((m): m is Material => !!m && matchesQuery(m, q)),
+          sortK,
+        ).map((m) => {
+          const id = m.id;
           const on = r.whenMaterialIds.includes(id);
           return (
             <button
