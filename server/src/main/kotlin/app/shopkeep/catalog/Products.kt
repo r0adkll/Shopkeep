@@ -344,7 +344,7 @@ class ProductRepository(private val materials: MaterialRepository) {
      * codes stay unique even when a whole palette shares a type prefix.
      */
     private fun skuCodes(p: Product, stock: Map<Long, Material>): Map<Int, Map<Long, String>> =
-        p.slots.withIndex().filter { it.value.kind != SlotKind.FIXED }.associate { (idx, slot) ->
+        p.slots.withIndex().filter { it.value.kind == SlotKind.CHOICE }.associate { (idx, slot) ->
             idx to distinctCodes(slot.optionMaterialIds.associateWith { stock[it]?.name ?: "?" })
         }
 
@@ -414,7 +414,9 @@ class ProductRepository(private val materials: MaterialRepository) {
             }
             val mat = stock[materialId]
             bom += Triple(slot.name, slot.quantity, mat)
-            if (slot.kind != SlotKind.FIXED) {
+            // Only CHOICE slots define a configuration's identity/SKU — rule
+            // slots are derived (they still count in BOM cost and buildable).
+            if (slot.kind == SlotKind.CHOICE) {
                 selections += ConfigSelection(idx, slot.name, materialId, mat?.name ?: "?", mat?.attributes?.get("color"))
                 skuParts += codes[idx]?.get(materialId) ?: "X"
             }

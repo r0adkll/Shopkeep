@@ -191,7 +191,8 @@ export function enumerate(p: ProductInput, byId: Map<number, Material>): Preview
         return;
       }
       bom.push({ slotName: slot.name, qty: slot.quantity, material });
-      if (slot.kind !== "FIXED") {
+      // Only CHOICE slots carry identity/SKU; rule slots are derived BOM.
+      if (slot.kind === "CHOICE") {
         selections.push({ slotName: slot.name, material });
         skuParts.push(codes.get(idx)?.get(material.id) ?? "X");
       }
