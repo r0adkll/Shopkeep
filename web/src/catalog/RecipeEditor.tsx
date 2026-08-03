@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DesignsTab, VariantsTab } from "./DesignsEditor";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -249,7 +249,7 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                         {ids.length < total && <span className="text-[11px] text-mut">rest fall through to default</span>}
                         <span className="ml-auto flex gap-1.5">
                           <button type="button" onClick={() => setComposer({ index: null, rule: { whenSlot: w, thenSlot: t, thenMaterialId: p.slots[t]?.optionMaterialIds[0] ?? 0, whenMaterialIds: [] } })}
-                            className="rounded border border-line px-2 py-0.5 text-xs text-ink2 hover:text-ink">edit map…</button>
+                            className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs text-ink2 hover:border-accent hover:text-ink"><Pencil size={12} /> edit map</button>
                           <button type="button" onClick={() => set({ rules: p.rules.filter((_, j) => !ids.includes(j)) })}
                             title="remove the whole map"
                             className="rounded-md border border-crit/40 p-1 text-crit hover:border-crit hover:bg-crit/10"><Trash2 size={12} /></button>
@@ -274,12 +274,12 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                 </span>
                 <span className="text-[10px] font-extrabold tracking-widest text-accent">THEN</span>
                 {p.slots[r.thenSlot]?.name || "?"} = <b>{byId.get(r.thenMaterialId)?.name ?? "?"}</b>
-                <span className="ml-auto flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-                  <button type="button" onClick={() => setComposer({ index: i, rule: { ...r } })} className="rounded border border-line px-2 py-0.5 text-xs text-ink2 hover:text-ink">
-                    Edit
+                <span className="ml-auto flex items-center gap-1.5">
+                  <button type="button" onClick={() => setComposer({ index: i, rule: { ...r } })} className="flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs text-ink2 hover:border-accent hover:text-ink">
+                    <Pencil size={12} /> edit
                   </button>
-                  <button type="button" onClick={() => set({ rules: p.rules.filter((_, j) => j !== i) })} className="rounded border border-line px-2 py-0.5 text-xs text-ink2 hover:text-crit">
-                    Delete
+                  <button type="button" onClick={() => set({ rules: p.rules.filter((_, j) => j !== i) })} title="delete rule" className="rounded-md border border-crit/40 p-1 text-crit hover:border-crit hover:bg-crit/10">
+                    <Trash2 size={13} />
                   </button>
                 </span>
               </div>
