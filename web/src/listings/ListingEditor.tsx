@@ -272,11 +272,11 @@ export function ListingEditor({
             </div>
           </div>
           <textarea
-            rows={3}
+            rows={10}
             value={l.description}
             onChange={(e) => set({ description: e.target.value })}
             placeholder="Storefront description…"
-            className="mt-3 w-full rounded-md border border-line bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
+            className="mt-3 min-h-32 w-full resize-y rounded-md border border-line bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent"
           />
         </div>
 
