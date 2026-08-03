@@ -124,11 +124,16 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
             ))}
           </div>
         )}
-        {existing?.id != null && tab === "designs" && (
-          <DesignsTab productId={existing.id} slots={p.slots} materials={materials.data ?? []} />
+        {/* Keep mounted across tab switches so in-progress edits survive. */}
+        {existing?.id != null && (
+          <div style={{ display: tab === "designs" ? undefined : "none" }}>
+            <DesignsTab productId={existing.id} slots={p.slots} materials={materials.data ?? []} />
+          </div>
         )}
-        {existing?.id != null && tab === "variants" && (
-          <VariantsTab productId={existing.id} slots={p.slots} materials={materials.data ?? []} />
+        {existing?.id != null && (
+          <div style={{ display: tab === "variants" ? undefined : "none" }}>
+            <VariantsTab productId={existing.id} slots={p.slots} materials={materials.data ?? []} />
+          </div>
         )}
         <div style={{ display: tab === "recipe" ? undefined : "none" }}>
         {/* product header */}

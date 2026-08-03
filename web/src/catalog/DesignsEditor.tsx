@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { Material } from "../inventory/api";
 import type { Slot } from "./api";
@@ -17,6 +17,17 @@ async function jget<T>(url: string): Promise<T> {
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
+function useSavedMsg(): [string | null, (m: string | null) => void] {
+  const [msg, setRaw] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setMsg = (m: string | null) => {
+    if (timer.current) clearTimeout(timer.current);
+    setRaw(m);
+    if (m === "Saved.") timer.current = setTimeout(() => setRaw(null), 2500);
+  };
+  return [msg, setMsg];
+}
+
 async function jput<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) throw new Error(await r.text());
@@ -81,9 +92,10 @@ function AssignmentRows(props: {
 }
 
 export function DesignsTab({ productId, slots, materials }: { productId: number; slots: Slot[]; materials: Material[] }) {
-  const [list, setList] = useState<ProductDesign[] | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  useEffect(() => { jget<ProductDesign[]>(`/api/v1/catalog/products/${productId}/designs`).then(setList).catch((e) => setMsg(String(e))); }, [productId]);
+  const [list, setListRaw] = useState<ProductDesign[] | null>(null);
+  const [msg, setMsg] = useSavedMsg();
+  const setList = (l: ProductDesign[] | null) => { setMsg(null); setListRaw(l); };
+  useEffect(() => { jget<ProductDesign[]>(`/api/v1/catalog/products/${productId}/designs`).then(setListRaw).catch((e) => setMsg(String(e))); }, [productId]);
   if (!list) return <p className="py-4 text-sm text-mut">Loading designs…</p>;
   const upd = (i: number, fn: (d: ProductDesign) => ProductDesign) => setList(list.map((d, j) => (j === i ? fn(d) : d)));
   return (
@@ -124,7 +136,7 @@ export function DesignsTab({ productId, slots, materials }: { productId: number;
       <button onClick={() => setList([...list, { id: null, name: "", assignments: [], overrideSets: [] }])}
         className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line py-2 text-sm text-accent hover:border-accent"><Plus size={14} /> design</button>
       <div className="mt-3 flex items-center gap-3">
-        <button onClick={() => jput<ProductDesign[]>(`/api/v1/catalog/products/${productId}/designs`, list).then((r) => { setList(r); setMsg("Saved."); }).catch((e) => setMsg(String(e)))}
+        <button onClick={() => jput<ProductDesign[]>(`/api/v1/catalog/products/${productId}/designs`, list).then((r) => { setListRaw(r); setMsg("Saved."); }).catch((e) => setMsg(String(e)))}
           className="rounded-md bg-accent px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90">Save designs</button>
         {msg && <span className="text-xs text-ink2">{msg}</span>}
       </div>
@@ -133,9 +145,10 @@ export function DesignsTab({ productId, slots, materials }: { productId: number;
 }
 
 export function VariantsTab({ productId, slots, materials }: { productId: number; slots: Slot[]; materials: Material[] }) {
-  const [list, setList] = useState<ProductVariant[] | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  useEffect(() => { jget<ProductVariant[]>(`/api/v1/catalog/products/${productId}/variants`).then(setList).catch((e) => setMsg(String(e))); }, [productId]);
+  const [list, setListRaw] = useState<ProductVariant[] | null>(null);
+  const [msg, setMsg] = useSavedMsg();
+  const setList = (l: ProductVariant[] | null) => { setMsg(null); setListRaw(l); };
+  useEffect(() => { jget<ProductVariant[]>(`/api/v1/catalog/products/${productId}/variants`).then(setListRaw).catch((e) => setMsg(String(e))); }, [productId]);
   if (!list) return <p className="py-4 text-sm text-mut">Loading variants…</p>;
   const upd = (i: number, fn: (v: ProductVariant) => ProductVariant) => setList(list.map((v, j) => (j === i ? fn(v) : v)));
   return (
@@ -197,7 +210,7 @@ export function VariantsTab({ productId, slots, materials }: { productId: number
       <button onClick={() => setList([...list, { id: null, name: "", adjustments: { slotDeltas: [], extras: [], laborDeltaMinutes: 0 } }])}
         className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line py-2 text-sm text-accent hover:border-accent"><Plus size={14} /> variant</button>
       <div className="mt-3 flex items-center gap-3">
-        <button onClick={() => jput<ProductVariant[]>(`/api/v1/catalog/products/${productId}/variants`, list).then((r) => { setList(r); setMsg("Saved."); }).catch((e) => setMsg(String(e)))}
+        <button onClick={() => jput<ProductVariant[]>(`/api/v1/catalog/products/${productId}/variants`, list).then((r) => { setListRaw(r); setMsg("Saved."); }).catch((e) => setMsg(String(e)))}
           className="rounded-md bg-accent px-4 py-1.5 text-sm font-semibold text-white hover:opacity-90">Save variants</button>
         {msg && <span className="text-xs text-ink2">{msg}</span>}
       </div>
