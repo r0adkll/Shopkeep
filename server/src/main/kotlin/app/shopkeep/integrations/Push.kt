@@ -41,8 +41,12 @@ data class PushSnapshot(
     val quantity: Int = 0,
     val state: String = "",
     val variations: Map<String, List<String>> = emptyMap(),
-    val photoDocumentIds: List<Long> = emptyList(), // local photos already uploaded
+    val photoDocumentIds: List<Long> = emptyList(), // legacy: uploaded, ids unknown
+    val photoMap: List<PhotoLink> = emptyList(), // local doc <-> etsy image (ordered)
 )
+
+@Serializable
+data class PhotoLink(val docId: Long, val etsyImageId: Long)
 
 @Serializable
 data class PushChange(
@@ -183,17 +187,32 @@ class PushService(
             changes += PushChange("variations", it, "axis on Etsy", null, "removed", "whole axis removed")
         }
 
-        // Photos: additive-only (locked concept). New = local photos not yet
-        // recorded as uploaded in the snapshot.
-        val uploaded = baseline?.photoDocumentIds ?: emptyList()
-        val newPhotos = l.input.imageDocumentIds.filter { it !in uploaded }
+        // Photos: full state sync via the doc<->image map (built by pull /
+        // recorded on upload). Legacy uploads without ids can't be deleted
+        // remotely — pull photos to relink.
+        val photoMap = baseline?.photoMap ?: emptyList()
+        val legacy = (baseline?.photoDocumentIds ?: emptyList()).filter { d -> photoMap.none { it.docId == d } }
+        val tracked = photoMap.map { it.docId } + legacy
+        val localIds = l.input.imageDocumentIds
+        val newPhotos = localIds.filter { it !in tracked }
+        val removed = photoMap.filter { it.docId !in localIds }
+        val removedLegacy = legacy.filter { it !in localIds }
+        val keptMapped = localIds.filter { d -> photoMap.any { it.docId == d } }
+        val reordered = keptMapped != photoMap.map { it.docId }.filter { it in localIds }
         if (newPhotos.isNotEmpty()) {
-            val etsyCount = current.images?.size ?: 0
-            val over = etsyCount + newPhotos.size > 20
-            changes += PushChange(
-                "photos", "Photos", "$etsyCount on Etsy", "+${newPhotos.size} to upload", "added",
-                if (over) "would exceed Etsy's 20-photo cap" else null,
-            )
+            val over = (current.images?.size ?: 0) - removed.size + newPhotos.size > 20
+            changes += PushChange("photos", "Photos", null, "+${newPhotos.size} to upload", "added",
+                if (over) "would exceed Etsy's 20-photo cap" else null)
+        }
+        if (removed.isNotEmpty()) {
+            changes += PushChange("photos", "Photos", "${removed.size} removed locally", null, "removed", "will be deleted on Etsy")
+        }
+        if (removedLegacy.isNotEmpty()) {
+            changes += PushChange("photos", "Photos", "${removedLegacy.size} removed locally", null, "removed",
+                "no Etsy link for these (uploaded before tracking) — pull photos to relink, else they stay on Etsy")
+        }
+        if (reordered && removed.isEmpty() && newPhotos.isEmpty()) {
+            changes += PushChange("photos", "Photos", "order on Etsy", "local order", "changed", "re-ranks on push")
         }
 
         val comboCount = want.variations.values.fold(1) { a, v -> a * maxOf(v.size, 1) }
@@ -279,19 +298,30 @@ class PushService(
             return fail(listingId, "details: $it")
         }
 
-        // 3) photos: additive-only uploads for local photos not yet on Etsy
-        val previouslyUploaded = dbQuery {
+        // 3) photos: full sync — delete removed, upload new at rank, re-rank moved
+        val snap0 = dbQuery {
             ListingsTable.selectAll().where { ListingsTable.id eq listingId }.singleOrNull()
-                ?.get(ListingsTable.pushedSnapshot)?.photoDocumentIds
-        } ?: emptyList()
-        val uploadedNow = mutableListOf<Long>()
-        for (docId in l.input.imageDocumentIds.filter { it !in previouslyUploaded }) {
-            val doc = documents.get(docId) ?: continue
-            connections.etsyUploadImage(connId, etsyId, doc.third, "shopkeep-$docId.jpg")?.let {
-                return fail(listingId, "photos: $it (uploaded ${uploadedNow.size} before failing)")
-            }
-            uploadedNow += docId
+                ?.get(ListingsTable.pushedSnapshot)
         }
+        val map0 = (snap0?.photoMap ?: emptyList()).toMutableList()
+        val legacyIds = (snap0?.photoDocumentIds ?: emptyList()).filter { d -> map0.none { it.docId == d } }
+        val localIds = l.input.imageDocumentIds
+        for (link in map0.filter { it.docId !in localIds }) {
+            connections.etsyDeleteImage(connId, etsyId, link.etsyImageId)?.let { return fail(listingId, "photos: $it") }
+            map0.removeAll { it.docId == link.docId }
+        }
+        for ((pos, docId) in localIds.withIndex()) {
+            if (map0.any { it.docId == docId } || docId in legacyIds) continue
+            val doc = documents.get(docId) ?: continue
+            val (err, imgId) = connections.etsyUploadImage(connId, etsyId, doc.third, "shopkeep-$docId.jpg", rank = pos + 1)
+            if (err != null) return fail(listingId, "photos: $err")
+            if (imgId != null) map0 += PhotoLink(docId, imgId)
+        }
+        for ((pos, docId) in localIds.withIndex()) {
+            val link = map0.firstOrNull { it.docId == docId } ?: continue
+            connections.etsyRankImage(connId, etsyId, link.etsyImageId, pos + 1)?.let { return fail(listingId, "photos: $it") }
+        }
+        val orderedMap = localIds.mapNotNull { d -> map0.firstOrNull { it.docId == d } }
 
         // 4) state last (renewal takes the fresh quantities)
         val currentState = connections.fetchListing(connId, etsyId)?.state
@@ -304,7 +334,10 @@ class PushService(
 
         dbQuery {
             ListingsTable.update({ ListingsTable.id eq listingId }) {
-                it[pushedSnapshot] = want.copy(photoDocumentIds = (previouslyUploaded + uploadedNow).distinct())
+                it[pushedSnapshot] = want.copy(
+                    photoDocumentIds = legacyIds.filter { it in localIds },
+                    photoMap = orderedMap,
+                )
                 it[syncState] = "in_sync"
                 it[lastPushedAt] = OffsetDateTime.now()
                 it[lastPushError] = null
@@ -327,22 +360,22 @@ class PushService(
         val etsyId = l.etsyListingId ?: return null
         val connId = connectionId() ?: return null
         val current = connections.fetchListing(connId, etsyId) ?: return null
-        val ids = mutableListOf<Long>()
+        val links = mutableListOf<PhotoLink>()
         for (img in current.images ?: emptyList()) {
             val url = img.urlFull ?: img.url570 ?: continue
             val bytes = connections.download(url) ?: continue
-            ids += documents.save("listing-photo", "image/jpeg", "etsy-${img.listingImageId}.jpg", bytes)
+            links += PhotoLink(documents.save("listing-photo", "image/jpeg", "etsy-${img.listingImageId}.jpg", bytes), img.listingImageId)
         }
-        if (ids.isEmpty()) return 0
-        listings.update(listingId, l.input.copy(imageDocumentIds = ids))
+        if (links.isEmpty()) return 0
+        listings.update(listingId, l.input.copy(imageDocumentIds = links.map { it.docId }))
         dbQuery {
             val snap = ListingsTable.selectAll().where { ListingsTable.id eq listingId }.singleOrNull()
                 ?.get(ListingsTable.pushedSnapshot) ?: etsyShape(current)
             ListingsTable.update({ ListingsTable.id eq listingId }) {
-                it[pushedSnapshot] = snap.copy(photoDocumentIds = ids)
+                it[pushedSnapshot] = snap.copy(photoDocumentIds = emptyList(), photoMap = links)
             }
         }
-        return ids.size
+        return links.size
     }
 
     /** Drift escape hatch: pull one Etsy field into the canonical listing. */

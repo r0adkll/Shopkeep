@@ -514,9 +514,9 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
     suspend fun download(url: String): ByteArray? =
         runCatching { http.get(url).body<ByteArray>() }.getOrNull()
 
-    /** Multipart image upload (uploadListingImage). Returns error text or null. */
-    suspend fun etsyUploadImage(connectionId: Long, etsyListingId: String, bytes: ByteArray, filename: String): String? {
-        val c = creds(connectionId) ?: return "Connection not available."
+    /** Multipart image upload (uploadListingImage). Returns error or the new listing_image_id. */
+    suspend fun etsyUploadImage(connectionId: Long, etsyListingId: String, bytes: ByteArray, filename: String, rank: Int? = null): Pair<String?, Long?> {
+        val c = creds(connectionId) ?: return "Connection not available." to null
         val resp = http.submitFormWithBinaryData(
             url = "$apiBase/shops/${c.shopId}/listings/$etsyListingId/images",
             formData = io.ktor.client.request.forms.formData {
@@ -527,6 +527,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                         append(HttpHeaders.ContentDisposition, "filename=\"$filename\"")
                     },
                 )
+                if (rank != null) append("rank", rank.toString())
             },
         ) {
             headers {
@@ -534,8 +535,40 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                 append(HttpHeaders.Authorization, "Bearer ${c.access}")
             }
         }
-        return if (resp.status.isSuccess()) null
-        else "Etsy ${resp.status.value} uploading $filename: ${resp.bodyAsText().take(300)}"
+        if (!resp.status.isSuccess()) return "Etsy ${resp.status.value} uploading $filename: ${resp.bodyAsText().take(300)}" to null
+        val id = runCatching { resp.body<EtsyListingImage>().listingImageId }.getOrNull()
+        return null to id
+    }
+
+    /** Re-rank an existing image (uploadListingImage with listing_image_id, no file). */
+    suspend fun etsyRankImage(connectionId: Long, etsyListingId: String, imageId: Long, rank: Int): String? {
+        val c = creds(connectionId) ?: return "Connection not available."
+        val resp = http.submitFormWithBinaryData(
+            url = "$apiBase/shops/${c.shopId}/listings/$etsyListingId/images",
+            formData = io.ktor.client.request.forms.formData {
+                append("listing_image_id", imageId.toString())
+                append("rank", rank.toString())
+            },
+        ) {
+            headers {
+                append("x-api-key", if (c.secret.isBlank()) c.keystring else "${c.keystring}:${c.secret}")
+                append(HttpHeaders.Authorization, "Bearer ${c.access}")
+            }
+        }
+        return if (resp.status.isSuccess()) null else "Etsy ${resp.status.value} re-ranking image $imageId: ${resp.bodyAsText().take(200)}"
+    }
+
+    /** Remove an image from the listing. */
+    suspend fun etsyDeleteImage(connectionId: Long, etsyListingId: String, imageId: Long): String? {
+        val c = creds(connectionId) ?: return "Connection not available."
+        val resp = http.request("$apiBase/shops/${c.shopId}/listings/$etsyListingId/images/$imageId") {
+            method = io.ktor.http.HttpMethod.Delete
+            headers {
+                append("x-api-key", if (c.secret.isBlank()) c.keystring else "${c.keystring}:${c.secret}")
+                append(HttpHeaders.Authorization, "Bearer ${c.access}")
+            }
+        }
+        return if (resp.status.isSuccess()) null else "Etsy ${resp.status.value} deleting image $imageId: ${resp.bodyAsText().take(200)}"
     }
 
     /** updateListing is form-encoded; values from a flat JSON object. */
