@@ -52,7 +52,7 @@ export function MaterialDetailDrawer({
           </span>
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold">{m.name}</h2>
-            {m.brand && <span className="rounded-full bg-panel2 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-ink2 uppercase">{m.brand}</span>}
+            {m.brand && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-accent uppercase">{m.brand}</span>}
             <p className="text-xs text-mut">
               {m.category} · {m.type} · {formatCost(m)}
             </p>
