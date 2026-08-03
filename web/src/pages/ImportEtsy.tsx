@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2, RotateCw, Trash2 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { type Material, inventoryApi } from "../inventory/api";
 import { type ProductSummary, catalogApi } from "../catalog/api";
@@ -125,7 +125,34 @@ export function ImportEtsyPage() {
             </h2>
             <Link to="/listings" className="ml-auto flex items-center gap-1 text-xs text-accent hover:underline"><ArrowLeft size={12} /> back to listings</Link>
           </div>
-          {!conn && <p className="py-4 text-sm text-ink2">No connected Etsy shop.</p>}
+          {!conn && !connections.isLoading && (
+            <p className="py-4 text-sm text-ink2">
+              No connected Etsy shop{connections.isError ? ` — couldn't load connections (${errText(connections.error)})` : ""}. Connect one on the Connections tab first.
+            </p>
+          )}
+          {listings.isError && (
+            <div className="my-2 flex flex-wrap items-center gap-2.5 rounded-lg border border-crit/40 bg-crit/5 px-4 py-2.5 text-sm text-crit">
+              <AlertTriangle size={15} className="flex-none" />
+              <span className="min-w-0">
+                Couldn't fetch listings from Etsy.
+                <span className="ml-1.5 font-mono text-xs opacity-80">{errText(listings.error)}</span>
+              </span>
+              <button
+                onClick={() => listings.refetch()}
+                className="ml-auto flex items-center gap-1 rounded-md border border-crit/40 px-2.5 py-1 text-xs font-bold hover:bg-crit/10"
+              >
+                <RotateCw size={12} /> Retry
+              </button>
+            </div>
+          )}
+          {startImport.isError && (
+            <div className="my-2 flex items-center gap-2 rounded-lg border border-crit/40 bg-crit/5 px-4 py-2 text-xs text-crit">
+              <AlertTriangle size={13} className="flex-none" /> Import failed: {errText(startImport.error)}
+            </div>
+          )}
+          {conn && listings.isSuccess && (listings.data ?? []).length === 0 && (
+            <p className="py-4 text-sm text-ink2">No active or draft listings found in {conn.shopName ?? "this shop"}.</p>
+          )}
           {listings.isLoading && (
             <div aria-busy="true" aria-label="Fetching listings from Etsy">
               <div className="mb-2 flex items-center gap-2.5 rounded-lg bg-panel2 px-4 py-2.5 text-sm text-ink2">
@@ -234,6 +261,15 @@ function OverrideMatchCheck({ axisValues, designs }: { axisValues: string[]; des
       ))}
     </div>
   );
+}
+
+function errText(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e);
+  try {
+    const j = JSON.parse(raw.replace(/^\d+\s*/, ""));
+    if (j?.message) return j.message;
+  } catch { /* raw is fine */ }
+  return raw.slice(0, 200);
 }
 
 const axisMode = (a: AxisMapping) => a.mode ?? (a.slotPosition != null ? "materials" : "modifier");
