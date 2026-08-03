@@ -287,7 +287,7 @@ export function ListingEditor({
                 type="button"
                 onClick={() => set({ axes: l.axes.filter((_, j) => j !== ai) })}
                 title="remove this axis"
-                className="absolute top-3 right-3 rounded-md p-1 text-crit hover:bg-crit/10"
+                className="absolute top-3 right-3 rounded-md border border-crit/40 p-1 text-crit hover:border-crit hover:bg-crit/10"
               >
                 <Trash2 size={14} />
               </button>
