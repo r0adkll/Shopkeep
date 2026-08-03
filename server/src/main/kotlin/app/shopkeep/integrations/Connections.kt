@@ -91,7 +91,10 @@ data class EtsyPropertyValue(
 )
 
 @Serializable
-data class EtsyOffering(val price: EtsyMoney = EtsyMoney())
+data class EtsyOffering(
+    val price: EtsyMoney = EtsyMoney(),
+    @SerialName("readiness_state_id") val readinessStateId: Long? = null,
+)
 
 @Serializable
 data class EtsyInventoryProduct(

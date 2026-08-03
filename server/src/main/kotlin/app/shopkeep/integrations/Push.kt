@@ -177,7 +177,11 @@ class PushService(
         val shopId = connections.creds(connId)?.shopId ?: return PushResult(false, "No shop id.")
         val etsyId = pv.etsyListingId!!
 
-        // 1) inventory: cartesian products matrix with SKUs per mode
+        // 1) inventory: cartesian products matrix with SKUs per mode.
+        // Etsy requires readiness_state_id on every offering — carry the
+        // listing's current one (processing profile readiness state).
+        val readinessStateId = connections.fetchListing(connId, etsyId)
+            ?.inventory?.products?.firstOrNull()?.offerings?.firstOrNull()?.readinessStateId
         val axes = l.input.axes.map { ax -> ax to ax.values.filter { it.offered } }
         if (axes.isNotEmpty()) {
             var combos = listOf(listOf<Pair<Int, app.shopkeep.listings.AxisValueInput>>())
@@ -215,6 +219,7 @@ class PushService(
                                     put("price", minor / 100.0)
                                     put("quantity", want.quantity)
                                     put("is_enabled", true)
+                                    if (readinessStateId != null) put("readiness_state_id", readinessStateId)
                                 })
                             }
                         })
