@@ -319,6 +319,32 @@ class PushService(
         return PushResult(false, msg)
     }
 
+    /** Photo pull: make local match Etsy — download its images into the
+     *  document store, replace the listing's photo set, and record them as
+     *  already-uploaded so nothing re-pushes. */
+    suspend fun pullPhotos(listingId: Long): Int? {
+        val l = listings.get(listingId) ?: return null
+        val etsyId = l.etsyListingId ?: return null
+        val connId = connectionId() ?: return null
+        val current = connections.fetchListing(connId, etsyId) ?: return null
+        val ids = mutableListOf<Long>()
+        for (img in current.images ?: emptyList()) {
+            val url = img.urlFull ?: img.url570 ?: continue
+            val bytes = connections.download(url) ?: continue
+            ids += documents.save("listing-photo", "image/jpeg", "etsy-${img.listingImageId}.jpg", bytes)
+        }
+        if (ids.isEmpty()) return 0
+        listings.update(listingId, l.input.copy(imageDocumentIds = ids))
+        dbQuery {
+            val snap = ListingsTable.selectAll().where { ListingsTable.id eq listingId }.singleOrNull()
+                ?.get(ListingsTable.pushedSnapshot) ?: etsyShape(current)
+            ListingsTable.update({ ListingsTable.id eq listingId }) {
+                it[pushedSnapshot] = snap.copy(photoDocumentIds = ids)
+            }
+        }
+        return ids.size
+    }
+
     /** Drift escape hatch: pull one Etsy field into the canonical listing. */
     suspend fun pullField(listingId: Long, fieldName: String): Boolean {
         val l = listings.get(listingId) ?: return false
@@ -352,6 +378,12 @@ fun Route.pushRoutes(push: PushService) {
             val r = push.push(id)
             if (r.ok) call.respond(r) else call.respond(HttpStatusCode.UnprocessableEntity, r)
         }
+        post("/listings/{id}/pull-photos") {
+            val n = call.parameters["id"]?.toLongOrNull()?.let { push.pullPhotos(it) }
+            if (n == null) call.respond(HttpStatusCode.UnprocessableEntity, ApiError("Couldn't pull photos from Etsy."))
+            else call.respond(mapOf("pulled" to n))
+        }
+
         post("/listings/{id}/pull-field") {
             val id = call.parameters["id"]?.toLongOrNull()
             val req = call.receive<PullFieldRequest>()

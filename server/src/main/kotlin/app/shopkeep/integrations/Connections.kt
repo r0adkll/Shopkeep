@@ -108,7 +108,11 @@ data class EtsyInventoryProduct(
 data class EtsyInventory(val products: List<EtsyInventoryProduct> = emptyList())
 
 @Serializable
-data class EtsyListingImage(@SerialName("listing_image_id") val listingImageId: Long = 0)
+data class EtsyListingImage(
+    @SerialName("listing_image_id") val listingImageId: Long = 0,
+    @SerialName("url_fullxfull") val urlFull: String? = null,
+    @SerialName("url_570xN") val url570: String? = null,
+)
 
 @Serializable
 data class EtsyShopListing(
@@ -505,6 +509,10 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         return if (resp.status.isSuccess()) null
         else "Etsy ${resp.status.value} on $path: ${resp.bodyAsText().take(300)}"
     }
+
+    /** Plain CDN download (listing photos are public URLs). */
+    suspend fun download(url: String): ByteArray? =
+        runCatching { http.get(url).body<ByteArray>() }.getOrNull()
 
     /** Multipart image upload (uploadListingImage). Returns error text or null. */
     suspend fun etsyUploadImage(connectionId: Long, etsyListingId: String, bytes: ByteArray, filename: String): String? {

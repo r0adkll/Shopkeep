@@ -92,6 +92,7 @@ export function ListingEditor({
 
   const [l, setL] = useState<ListingInput>(existing?.input ?? defaultInput(product, byId));
   const [reviewing, setReviewing] = useState(false);
+  const [pullingPhotos, setPullingPhotos] = useState(false);
   const [priceStr, setPriceStr] = useState(existing ? (existing.input.basePriceMinor / 100).toFixed(2) : "");
   const [savedBaseline, setSavedBaseline] = useState(() => JSON.stringify(existing?.input ?? null));
   const [editingProfile, setEditingProfile] = useState(false);
@@ -770,6 +771,25 @@ export function ListingEditor({
                 className="mt-2 w-full rounded-md border border-accent px-3 py-1.5 text-sm font-semibold text-accent hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {dirty ? "Save first, then review & push" : "Review & push to Etsy…"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setPullingPhotos(true);
+                  const res = await fetch(`/api/v1/listings/${existing.id}/pull-photos`, { method: "POST" });
+                  const j = await res.json().catch(() => null);
+                  setPullingPhotos(false);
+                  if (res.ok) {
+                    queryClient.invalidateQueries({ queryKey: ["listings"] });
+                    queryClient.invalidateQueries({ queryKey: ["push-preview"] });
+                    window.location.reload();
+                  } else alert(j?.message ?? "Pull failed");
+                }}
+                disabled={pullingPhotos}
+                title="replace Shopkeep's photo set with Etsy's current images (downloads into the document store; nothing re-pushes)"
+                className="mt-1.5 w-full rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink2 hover:border-accent hover:text-ink disabled:opacity-50"
+              >
+                {pullingPhotos ? "Pulling photos…" : "⬇ Pull photos from Etsy"}
               </button>
             </>
           )}
