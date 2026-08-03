@@ -73,7 +73,7 @@ export function ListingEditor({
     queryKey: ["designs", product.id],
     queryFn: async () => {
       const r = await fetch(`/api/v1/catalog/products/${product.id}/designs`);
-      return (await r.json()) as { id: number; name: string; overrideSets: { key: string }[] }[];
+      return (await r.json()) as { id: number; name: string; assignments: { slotPosition: number; materialId: number; qtyOverride: number | null }[]; overrideSets: { key: string }[] }[];
     },
   });
   const pVariants = useQuery({
@@ -388,7 +388,65 @@ export function ListingEditor({
           <Plus size={14} /> axis {l.axes.length >= 3 ? "(Etsy max 3)" : ""}
         </button>
 
-        {/* derived configurations — live from the recipe, always visible */}
+        {/* per-combo configurations for material listings; designs preview for
+            listing-level ones (locked concept: no SKU table when a design axis
+            resolves the BOM at order time) */}
+        {l.axes.some((a) => (a.valueSource ?? "materials") !== "materials") ? (
+          <>
+            <SectionTitle>
+              Designs preview
+              <Hint>listing-level SKU — BOM resolves from the chosen design at order time; no per-combo SKU table</Hint>
+            </SectionTitle>
+            <div className="overflow-x-auto rounded-xl border border-line bg-panel shadow-sm">
+              <table className="w-full min-w-[480px] border-collapse text-[13px]">
+                <thead>
+                  <tr className="text-left text-[10px] tracking-widest text-mut uppercase">
+                    <th className="border-b border-line px-3 py-2">Value</th>
+                    <th className="border-b border-line px-3 py-2">Palette</th>
+                    <th className="border-b border-line px-3 py-2">BOM</th>
+                    <th className="border-b border-line px-3 py-2">Buildable</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {l.axes
+                    .filter((a) => a.valueSource === "designs")
+                    .flatMap((a) => a.values.filter((v) => v.offered && v.designId != null))
+                    .map((v, i) => {
+                      const d = (pDesigns.data ?? []).find((x) => x.id === v.designId);
+                      if (!d) return null;
+                      let cost = 0;
+                      let buildable = Infinity;
+                      const dots = d.assignments.map((asg, k) => {
+                        const m = byId.get(asg.materialId);
+                        const qty = asg.qtyOverride ?? product.slots[asg.slotPosition]?.quantity ?? 0;
+                        if (m && qty > 0) {
+                          cost += (qty * m.costMinor) / (m.costQuantity || 1);
+                          buildable = Math.min(buildable, Math.floor(m.stock.available / qty));
+                        }
+                        return (
+                          <span key={k} className="mr-0.5 inline-block rounded-full border border-line align-[-1px]"
+                            style={{ width: k ? 9 : 13, height: k ? 9 : 13, background: m ? (materialColor(m) ?? "var(--color-panel2)") : undefined }} />
+                        );
+                      });
+                      const b = buildable === Infinity ? 0 : buildable;
+                      return (
+                        <tr key={i}>
+                          <td className="border-b border-line/40 px-3 py-1.5 font-semibold">{v.displayLabel || d.name}</td>
+                          <td className="border-b border-line/40 px-3 py-1.5">{dots}<span className="ml-1 text-xs text-ink2">{d.name}</span></td>
+                          <td className="border-b border-line/40 px-3 py-1.5 font-mono">{money(Math.round(cost))}</td>
+                          <td className={`border-b border-line/40 px-3 py-1.5 font-mono font-bold ${b < 3 ? "text-crit" : b < 8 ? "text-warn" : "text-good"}`}>{b}</td>
+                        </tr>
+                      );
+                    })}
+                  {l.axes.filter((a) => a.valueSource === "designs").length === 0 && (
+                    <tr><td className="px-3 py-3 text-mut" colSpan={4}>No design axis — variant/override axes adjust the build; the BOM comes from the design or material axis at order time.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <>
         <SectionTitle>
           Configurations <span className="font-mono font-normal text-mut">{derived.length}</span>
           <Hint>derived live from the recipe · SKUs become durable on save · unchecking hides a pair (is_enabled=false)</Hint>
@@ -454,6 +512,8 @@ export function ListingEditor({
             </tbody>
           </table>
         </div>
+          </>
+        )}
 
         {/* extras */}
         <SectionTitle>Per-order extras <Hint>consumed by every order, beyond the recipe</Hint></SectionTitle>
