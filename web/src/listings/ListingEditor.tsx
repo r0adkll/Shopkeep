@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatQty, inventoryApi, materialColor, type Material } from "../inventory/api";
 import { MaterialPicker } from "../inventory/MaterialPicker";
@@ -251,7 +252,37 @@ export function ListingEditor({
                 }
                 className="w-40 border-b border-dashed border-line bg-transparent font-semibold outline-none focus:border-accent"
               />
-              <span className="text-xs text-mut">← {product.slots[axis.productSlotPosition]?.name}</span>
+              <span className="text-xs text-mut">fills →</span>
+              <select
+                value={axis.productSlotPosition}
+                onChange={(e) => {
+                  const pos = Number(e.target.value);
+                  const tmpl = defaultInput(product, byId).axes.find((a) => a.productSlotPosition === pos);
+                  set({
+                    axes: l.axes.map((a, j) =>
+                      j === ai
+                        ? { ...a, productSlotPosition: pos, ...((a.valueSource ?? "materials") === "materials" ? { values: tmpl?.values ?? [] } : {}) }
+                        : a,
+                    ),
+                  });
+                }}
+                className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
+                title="which recipe slot this axis fills"
+              >
+                {product.slots.map((sl, si) =>
+                  sl.kind === "CHOICE" ? (
+                    <option key={si} value={si}>{sl.name} ({sl.quantity}{sl.optional ? ", optional" : ""})</option>
+                  ) : null,
+                )}
+              </select>
+              <button
+                type="button"
+                onClick={() => set({ axes: l.axes.filter((_, j) => j !== ai) })}
+                title="remove this axis"
+                className="rounded-md border border-line p-1 text-mut hover:border-crit hover:text-crit"
+              >
+                <Trash2 size={13} />
+              </button>
               {/* value source (locked seam concept): materials | designs | variants | override sets */}
               <select
                 value={axis.valueSource ?? "materials"}
@@ -334,6 +365,20 @@ export function ListingEditor({
             </div>
           </div>
         ))}
+        <button
+          type="button"
+          disabled={l.axes.length >= 3}
+          onClick={() => {
+            const tmpl = defaultInput(product, byId).axes;
+            const used = new Set(l.axes.map((a) => a.productSlotPosition));
+            const next = tmpl.find((a) => !used.has(a.productSlotPosition)) ?? tmpl[0];
+            if (next) set({ axes: [...l.axes, { ...next, values: [...next.values] }] });
+          }}
+          title={l.axes.length >= 3 ? "Etsy allows at most 3 variation axes" : "add a variation axis"}
+          className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line py-2 text-sm text-accent hover:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Plus size={14} /> axis {l.axes.length >= 3 ? "(Etsy max 3)" : ""}
+        </button>
 
         {/* derived configurations — live from the recipe, always visible */}
         <SectionTitle>
