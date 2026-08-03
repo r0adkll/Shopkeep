@@ -68,6 +68,7 @@ export function MaterialGauge({ m, onClick }: { m: Material; onClick: () => void
         </text>
       </svg>
       <span className="mt-1.5 text-[13px] leading-tight font-semibold">{m.name}</span>
+      {m.brand && <span className="text-[10px] leading-tight text-mut">{m.brand}</span>}
       <span className="flex items-center gap-1 text-[11.5px] text-mut">
         <MaterialIcon category={m.category} type={m.type} size={12} />
         {m.type}

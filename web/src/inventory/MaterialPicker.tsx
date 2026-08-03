@@ -59,7 +59,7 @@ export function MaterialPicker({
           >
             <span className="h-3.5 w-3.5 rounded-full border border-line" style={{ background: materialColor(m) ?? "var(--color-panel2)" }} />
             {m.name}
-            <span className="text-[11px] text-mut">{m.category}</span>
+            <span className="text-[11px] text-mut">{m.brand ?? m.category}</span>
             <span className="font-mono text-[11px] text-mut">
               {formatQty(m.stock.available)} {m.unit}
             </span>

@@ -141,7 +141,7 @@ export function sortMaterials(list: Material[], sort: SortKey): Material[] {
 
 export function matchesQuery(m: Material, q: string): boolean {
   if (!q) return true;
-  const hay = `${m.name} ${m.type} ${m.category} ${Object.values(m.attributes).join(" ")}`.toLowerCase();
+  const hay = `${`${m.brand ?? ""} ${m.name}`} ${m.type} ${m.category} ${Object.values(m.attributes).join(" ")}`.toLowerCase();
   return q
     .toLowerCase()
     .split(/\s+/)

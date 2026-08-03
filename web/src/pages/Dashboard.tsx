@@ -235,6 +235,7 @@ export function DashboardPage() {
                 <button type="button" onClick={() => setDetailId(m.id)} className="font-medium hover:underline">
                   {m.name}
                 </button>
+                {m.brand && <span className="text-[10.5px] text-mut">{m.brand}</span>}
                 <span className="text-xs text-mut">
                   {formatQty(m.stock.available)} {m.unit} left · threshold {formatQty(m.lowStockThreshold ?? 0)}
                 </span>
