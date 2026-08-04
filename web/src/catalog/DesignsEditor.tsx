@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { Material } from "../inventory/api";
 import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
+import { MaterialForm } from "../inventory/MaterialForm";
 import type { Slot } from "./api";
 
 /* D20 — Designs & Variants tabs (locked concept, tabbed round 3). */
@@ -43,6 +44,7 @@ const matDot = (m: Material | undefined) => (
  *  whole-shelf <select> — unusable at 75+ spools). */
 function MatSelect({ materials, value, onChange }: { materials: Material[]; value: number; onChange: (id: number) => void }) {
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const m = materials.find((x) => x.id === value);
   return (
     <>
@@ -60,7 +62,15 @@ function MatSelect({ materials, value, onChange }: { materials: Material[]; valu
           all={materials}
           title={m ? `Replace ${m.name}` : "Pick a material"}
           onPick={(id) => { onChange(id); setOpen(false); }}
+          onCreateNew={() => { setOpen(false); setCreating(true); }}
           onClose={() => setOpen(false)}
+        />
+      )}
+      {creating && (
+        <MaterialForm
+          categories={[...new Set(materials.map((x) => x.category))]}
+          onSaved={(saved) => onChange(saved.id)}
+          onClose={() => setCreating(false)}
         />
       )}
     </>
