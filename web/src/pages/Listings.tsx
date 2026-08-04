@@ -128,7 +128,7 @@ export function ListingsPage() {
               // div, not button — the card holds a nested "open on Etsy" link
               <div key={l.id} role="button" tabIndex={0} onClick={() => open.mutate(l)}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open.mutate(l); } }}
-                className={`flex cursor-pointer gap-3.5 rounded-xl border border-line bg-panel p-4 text-left shadow-sm hover:border-accent ${l.archived ? "opacity-70" : ""}`}>
+                className={`relative flex cursor-pointer gap-3.5 rounded-xl border border-line bg-panel p-4 text-left shadow-sm hover:border-accent ${l.archived ? "opacity-70" : ""}`}>
                 {thumbId != null ? (
                   <div className="relative flex-none self-start">
                     <img src={documentUrl(thumbId)} alt="" loading="lazy"
@@ -152,7 +152,7 @@ export function ListingsPage() {
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <h2 className="line-clamp-2 text-[14px] leading-snug font-semibold">{l.input.title}</h2>
+                  <h2 className={`line-clamp-2 text-[14px] leading-snug font-semibold ${l.etsyListingId ? "pr-20" : ""}`}>{l.input.title}</h2>
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider ${STATE_STYLE[l.input.state] ?? ""}`}>
                       {l.input.state.toUpperCase()}
@@ -163,18 +163,18 @@ export function ListingsPage() {
                     {l.archived && (
                       <span className="rounded-full bg-line/60 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-mut">ARCHIVED</span>
                     )}
-                    {l.etsyListingId && (
-                      <a
-                        href={`https://www.etsy.com/your/shops/me/listing-editor/edit/${l.etsyListingId}`}
-                        target="_blank" rel="noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        title="Open in Etsy's listing editor"
-                        className="ml-auto flex items-center gap-1 rounded-md border border-accent/40 px-2 py-0.5 text-[10.5px] font-semibold text-accent hover:bg-accent/5"
-                      >
-                        <ExternalLink size={11} /> Etsy
-                      </a>
-                    )}
                   </div>
+                  {l.etsyListingId && (
+                    <a
+                      href={`https://www.etsy.com/your/shops/me/listing-editor/edit/${l.etsyListingId}`}
+                      target="_blank" rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Open in Etsy's listing editor"
+                      className="absolute top-3.5 right-3.5 flex items-center gap-1.5 rounded-md border border-accent/40 px-2.5 py-1 text-[12.5px] font-semibold text-accent hover:bg-accent/5"
+                    >
+                      <ExternalLink size={14} /> Etsy
+                    </a>
+                  )}
                   <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
                     <span className="font-mono text-[13px] font-semibold">${(l.input.basePriceMinor / 100).toFixed(2)}</span>
                     <span className={l.input.quantity === 0 ? "font-semibold text-warn" : "text-ink2"}>
