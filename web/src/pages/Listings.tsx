@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { Download } from "lucide-react";
+import { Download, ImageOff, Video } from "lucide-react";
 import { Card, Wordmark, NavTabs } from "../ui";
 import { inventoryApi } from "../inventory/api";
-import { catalogApi, type Product } from "../catalog/api";
+import { catalogApi, documentUrl, type Product } from "../catalog/api";
 import { listingsApi, type Listing } from "./../listings/api";
 import { ListingEditor } from "../listings/ListingEditor";
 
@@ -123,29 +123,60 @@ export function ListingsPage() {
                 not_published: ["NOT PUBLISHED", "bg-panel2 text-mut"],
               };
               const [syncLabel, syncTone] = SYNC[l.syncState] ?? [l.syncState.replace("_", " ").toUpperCase(), "bg-panel2 text-mut"];
+              const thumbId = l.input.imageDocumentIds[0];
               return (
-              <button key={l.id} type="button" onClick={() => open.mutate(l)} className="rounded-xl border border-line bg-panel p-5 text-left shadow-sm hover:border-accent">
-                <div className="flex items-center gap-2.5">
-                  <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold">{l.input.title}</h2>
-                  <span className={`rounded-full px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider ${STATE_STYLE[l.input.state] ?? ""}`}>
-                    {l.input.state.toUpperCase()}
-                  </span>
-                  <span className={`rounded-full px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider ${syncTone}`} title={l.etsyListingId ? `etsy listing ${l.etsyListingId}` : "no platform link yet"}>
-                    {syncLabel}{l.etsyListingId ? " · ETSY" : ""}
-                  </span>
-                  {l.archived && (
-                    <span className="rounded-full bg-line/60 px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider text-mut">ARCHIVED</span>
-                  )}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink2">
-                  <span>{productById.get(l.input.productId)?.name ?? `product ${l.input.productId}`}</span>
-                  {l.input.skuMode === "listing_level" ? (
-                    <span>SKU <b className="font-mono">{l.input.listingSku ?? "listing-level"}</b></span>
-                  ) : (
-                    <span><b className="font-mono">{l.configurations.filter((c) => c.enabled).length}</b> SKUs</span>
-                  )}
-                  <span className="font-mono">${(l.input.basePriceMinor / 100).toFixed(2)}</span>
-                  {l.etsyListingId && <span className="font-mono text-mut">etsy #{l.etsyListingId}</span>}
+              <button key={l.id} type="button" onClick={() => open.mutate(l)}
+                className={`flex gap-3.5 rounded-xl border border-line bg-panel p-4 text-left shadow-sm hover:border-accent ${l.archived ? "opacity-70" : ""}`}>
+                {thumbId != null ? (
+                  <div className="relative flex-none self-start">
+                    <img src={documentUrl(thumbId)} alt="" loading="lazy"
+                      className="h-20 w-20 rounded-lg border border-line object-cover" />
+                    {l.input.imageDocumentIds.length > 1 && (
+                      <span className="absolute right-1 bottom-1 rounded bg-black/60 px-1 text-[9px] font-bold text-white">
+                        {l.input.imageDocumentIds.length}
+                      </span>
+                    )}
+                    {l.input.videoDocumentId != null && (
+                      <span className="absolute top-1 right-1 rounded bg-black/60 p-0.5 text-white" title="has video">
+                        <Video size={10} />
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex h-20 w-20 flex-none flex-col items-center justify-center gap-1 self-start rounded-lg border border-dashed border-line bg-panel2 text-mut"
+                    title="No photos yet — Etsy listings need at least one">
+                    <ImageOff size={18} />
+                    <span className="text-[8.5px] font-bold tracking-wider uppercase">no photo</span>
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <h2 className="line-clamp-2 text-[14px] leading-snug font-semibold">{l.input.title}</h2>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider ${STATE_STYLE[l.input.state] ?? ""}`}>
+                      {l.input.state.toUpperCase()}
+                    </span>
+                    <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider ${syncTone}`} title={l.etsyListingId ? `etsy listing ${l.etsyListingId}` : "no platform link yet"}>
+                      {syncLabel}{l.etsyListingId ? " · ETSY" : ""}
+                    </span>
+                    {l.archived && (
+                      <span className="rounded-full bg-line/60 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-mut">ARCHIVED</span>
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
+                    <span className="font-mono text-[13px] font-semibold">${(l.input.basePriceMinor / 100).toFixed(2)}</span>
+                    <span className={l.input.quantity === 0 ? "font-semibold text-warn" : "text-ink2"}>
+                      {l.input.quantity === 0 ? "out of stock" : `${l.input.quantity} in stock`}
+                    </span>
+                    {l.input.skuMode === "listing_level" ? (
+                      <span className="text-ink2">SKU <b className="font-mono">{l.input.listingSku ?? "—"}</b></span>
+                    ) : (
+                      <span className="text-ink2"><b className="font-mono">{l.configurations.filter((c) => c.enabled).length}</b> SKUs</span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-mut">
+                    <span className="truncate">{productById.get(l.input.productId)?.name ?? `product ${l.input.productId}`}</span>
+                    {l.etsyListingId && <span className="font-mono">etsy #{l.etsyListingId}</span>}
+                  </div>
                 </div>
               </button>
               );
