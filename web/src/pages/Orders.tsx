@@ -447,7 +447,7 @@ function OrderDetailPanel(props: {
             </span>
           </div>
           {o?.shipBy && (
-            <div className="mt-1">
+            <div className="mt-0.5">
               <span
                 title="Etsy expected ship date"
                 className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider uppercase ${shipByTone(o.shipBy)}`}
@@ -966,7 +966,7 @@ function OrderCard(props: {
         </span>
       </div>
       {o.shipBy && (
-        <div className="mt-0.5">
+        <div>
           <span
             title={`Etsy expected ship date: ${new Date(o.shipBy).toLocaleDateString()}`}
             className={`rounded-full px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider whitespace-nowrap uppercase ${shipByTone(o.shipBy)}`}
