@@ -161,6 +161,7 @@ data class OrderLineView(
     val needsReview: Boolean = false,
     val reviewReasons: List<String> = emptyList(),
     val productName: String?,
+    val listingTitle: String? = null, // canonical listing name — distinguishes listings sharing a recipe
     val colors: List<LineColor> = emptyList(),
     val variations: List<EtsyVariation>,
     val personalization: List<EtsyVariation>,
@@ -872,10 +873,14 @@ class SyncService(
     suspend fun listOrders(): List<OrderView> {
         // configId -> (sku, productName, colors); listingId -> productName
         var listingProductNames = mapOf<Long, String>()
+        var listingTitles = mapOf<Long, String>()
         var configListing = mapOf<Long, Long>()
         val configInfo = dbQuery {
             val listingProduct = ListingsTable.selectAll().associate {
                 it[ListingsTable.id] to it[ListingsTable.productId]
+            }
+            listingTitles = ListingsTable.selectAll().associate {
+                it[ListingsTable.id] to it[ListingsTable.title]
             }
             val productNames = app.shopkeep.catalog.ProductsTable.selectAll().associate {
                 it[app.shopkeep.catalog.ProductsTable.id] to it[app.shopkeep.catalog.ProductsTable.name]
@@ -922,6 +927,8 @@ class SyncService(
                         matchedListing = l[OrderLinesTable.matchedListingId] != null,
                         matchedListingId = l[OrderLinesTable.matchedListingId]
                             ?: l[OrderLinesTable.listingConfigurationId]?.let(configListing::get),
+                        listingTitle = (l[OrderLinesTable.matchedListingId]
+                            ?: l[OrderLinesTable.listingConfigurationId]?.let(configListing::get))?.let(listingTitles::get),
                         needsReview = l[OrderLinesTable.needsReview],
                         reviewReasons = l[OrderLinesTable.reviewReasons],
                         productName = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.second }

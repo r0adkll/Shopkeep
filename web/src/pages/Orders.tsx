@@ -25,6 +25,7 @@ type OrderLine = {
   needsReview: boolean;
   reviewReasons: string[];
   productName: string | null;
+  listingTitle: string | null;
   colors: LineColor[];
   variations: Variation[];
   personalization: Variation[];
@@ -504,7 +505,7 @@ function OrderDetailPanel(props: {
                   >
                     <div className="flex items-center gap-1.5">
                       <span className="flex-none font-mono text-[10.5px] text-mut">{l.quantity}×</span>
-                      <span className="min-w-0 truncate text-sm font-bold">{l.productName ?? l.title}</span>
+                      <span className="min-w-0 truncate text-sm font-bold" title={l.listingTitle ?? l.title}>{l.listingTitle ?? l.productName ?? l.title}</span>
                       <span className="ml-auto flex-none font-mono text-xs text-ink2">{money(l.priceMinor * l.quantity)}</span>
                     </div>
                     {l.colors.map((c, i) => (
@@ -914,7 +915,7 @@ function OrderCard(props: {
           const head = (
             <>
               <span className="flex-none font-mono text-[10.5px] text-mut">{l.quantity}×</span>
-              <span className="min-w-0 truncate text-[13.5px] font-bold text-ink">{l.productName ?? l.title}</span>
+              <span className="min-w-0 truncate text-[13.5px] font-bold text-ink" title={l.listingTitle ?? l.title}>{l.listingTitle ?? l.productName ?? l.title}</span>
             </>
           );
           const rows = (l.colors.length > 0 ? l.colors : !l.matchedSku ? [{ hex: null, name: `unknown — raw sku ${l.rawSku ?? "—"}` }] : []).map(
