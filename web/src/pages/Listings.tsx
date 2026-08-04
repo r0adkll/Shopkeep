@@ -191,7 +191,7 @@ export function ListingsPage() {
                     {l.etsyListingId && <span className="font-mono">etsy #{l.etsyListingId}</span>}
                   </div>
                 </div>
-              </button>
+              </div>
               );
             })}
           </div>
