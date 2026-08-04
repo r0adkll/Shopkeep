@@ -23,6 +23,12 @@ services:
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       SYNC_INTERVAL_MINUTES: ${SYNC_INTERVAL_MINUTES:-5}
       ORDER_ARCHIVE_DAYS: ${ORDER_ARCHIVE_DAYS:-30}
+      MEDIA_DIR: /data/media
+    volumes:
+      # Large media (listing videos) — mirror-tier state, re-pullable from
+      # Etsy (vault: D21). Back up with e.g.
+      #   docker run --rm -v shopkeep-media:/m -v ./backups:/b alpine tar czf /b/media.tar.gz -C /m .
+      - shopkeep-media:/data/media
     depends_on:
       db:
         condition: service_healthy
@@ -42,10 +48,12 @@ services:
       timeout: 3s
       retries: 10
 
-  # Nightly pg_dump with 14-day rotation. Postgres holds ALL Shopkeep state
-  # (including generated PDFs), so this dump is a complete backup — but the
-  # TOKEN_ENCRYPTION_KEY in your .env must be backed up alongside it, or
-  # storefront connections will need re-authentication after restore.
+  # Nightly pg_dump with 14-day rotation. Postgres holds all IRREPLACEABLE
+  # Shopkeep state (orders, ledger, PDFs, images), so this dump restores a
+  # working shop — but two things live beside it (vault: D12/D21):
+  #   - TOKEN_ENCRYPTION_KEY in your .env (or storefronts re-authenticate)
+  #   - the shopkeep-media volume (listing videos; mirror-tier — a restore
+  #     without it degrades gracefully and can re-pull from Etsy)
   backup:
     image: postgres:16
     profiles: ["backup"]
@@ -79,3 +87,4 @@ services:
 
 volumes:
   shopkeep-db:
+  shopkeep-media:

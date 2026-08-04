@@ -49,6 +49,7 @@ data class PushSnapshot(
     val persCharMax: Int? = null,
     val persInstructions: String = "",
     val persQuestions: List<PersQ> = emptyList(), // native questions normal form
+    val videoLink: PhotoLink? = null, // local doc <-> etsy video (one per listing)
 )
 
 /** Comparable normal form of one Etsy personalization question. */
@@ -277,6 +278,21 @@ class PushService(
         if (reordered && removed.isEmpty() && newPhotos.isEmpty()) {
             changes += PushChange("photos", "Photos", "order on Etsy", "local order", "changed", "re-ranks on push")
         }
+        // Video: one per listing. Tracked via snapshot videoLink (doc <-> etsy id).
+        val wantVid = l.input.videoDocumentId
+        val haveVid = current.videos?.firstOrNull { it.videoState != "deleted" }
+        val baseVid = baseline?.videoLink
+        when {
+            wantVid != null && baseVid?.docId == wantVid && haveVid != null -> {} // in sync
+            wantVid != null -> changes += PushChange("photos", "Video",
+                if (haveVid != null) "video on Etsy" else null, "uploads local video",
+                if (haveVid != null && baseVid == null && baseline != null) "drift" else if (haveVid != null) "changed" else "added",
+                if (haveVid != null) "replaces the current Etsy video" else null)
+            haveVid != null && baseVid != null -> changes += PushChange("photos", "Video",
+                "video on Etsy", null, "removed", "will be deleted on Etsy")
+            haveVid != null -> changes += PushChange("photos", "Video",
+                "video on Etsy (not tracked locally)", null, "drift", "pull to adopt it, or push deletes it")
+        }
         return changes
     }
 
@@ -469,6 +485,29 @@ class PushService(
         }
         val orderedMap = localIds.mapNotNull { d -> map0.firstOrNull { it.docId == d } }
 
+        // 3b) video: one per listing. Upload replaces Etsy's current video;
+        // want-none deletes it (drift semantics: Shopkeep wins, per review row).
+        val haveVideo = current0?.videos?.firstOrNull { it.videoState != "deleted" }
+        val baseVideoLink = snap0?.videoLink
+        var newVideoLink = baseVideoLink
+        val wantVideo = l.input.videoDocumentId
+        when {
+            wantVideo != null && baseVideoLink?.docId == wantVideo && haveVideo != null ->
+                newVideoLink = PhotoLink(wantVideo, haveVideo.videoId) // unchanged; refresh etsy id
+            wantVideo != null -> {
+                val doc = documents.get(wantVideo)
+                if (doc == null) return fail(listingId, "video: local file missing from the media volume (D21) — re-upload it or pull from Etsy")
+                val (err, vidId) = connections.etsyUploadVideo(connId, etsyId, doc.third, "shopkeep-$wantVideo.mp4", doc.second)
+                if (err != null) return fail(listingId, "video: $err")
+                newVideoLink = vidId?.let { PhotoLink(wantVideo, it) }
+            }
+            haveVideo != null -> {
+                connections.etsyDeleteVideo(connId, etsyId, haveVideo.videoId)?.let { return fail(listingId, "video: $it") }
+                newVideoLink = null
+            }
+            else -> newVideoLink = null
+        }
+
         // 4) state last (renewal takes the fresh quantities)
         val currentState = connections.fetchListing(connId, etsyId)?.state
         if (currentState != null && currentState != want.state && want.state in setOf("active", "draft", "inactive")) {
@@ -483,6 +522,7 @@ class PushService(
                 it[pushedSnapshot] = want.copy(
                     photoDocumentIds = legacyIds.filter { it in localIds },
                     photoMap = orderedMap,
+                    videoLink = newVideoLink,
                 )
                 it[syncState] = "in_sync"
                 it[lastPushedAt] = OffsetDateTime.now()
@@ -531,6 +571,24 @@ class PushService(
         val connId = connectionId() ?: return false
         val e = connections.fetchListing(connId, etsyId) ?: return false
         val cur = etsyShape(e)
+        if (fieldName.equals("video", true)) {
+            // adopt (or clear) Etsy's video: download to the media volume,
+            // record the link so the diff lands in_sync
+            val v = e.videos?.firstOrNull { it.videoState != "deleted" }
+            val link = if (v?.videoUrl == null) null else {
+                val bytes = connections.download(v.videoUrl) ?: return false
+                PhotoLink(documents.saveFile("listing-video", "video/mp4", "etsy-${v.videoId}.mp4", bytes), v.videoId)
+            }
+            if (!listings.update(listingId, l.input.copy(videoDocumentId = link?.docId))) return false
+            dbQuery {
+                val snap = ListingsTable.selectAll().where { ListingsTable.id eq listingId }.singleOrNull()
+                    ?.get(ListingsTable.pushedSnapshot) ?: etsyShape(e)
+                ListingsTable.update({ ListingsTable.id eq listingId }) {
+                    it[pushedSnapshot] = snap.copy(videoLink = link)
+                }
+            }
+            return true
+        }
         // "Personalization Q2"-style rows all pull the whole question set
         val input = when (fieldName.lowercase().let { if (it.startsWith("personalization")) "personalization" else it }) {
             "title" -> l.input.copy(title = cur.title)

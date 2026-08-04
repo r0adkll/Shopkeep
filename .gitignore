@@ -26,3 +26,4 @@ deploy/backups/
 
 # Kotlin compiler session artifacts
 .kotlin/
+data/

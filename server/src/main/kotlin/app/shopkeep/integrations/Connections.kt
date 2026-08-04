@@ -115,6 +115,14 @@ data class EtsyListingImage(
 )
 
 @Serializable
+data class EtsyListingVideo(
+    @SerialName("video_id") val videoId: Long = 0,
+    @SerialName("thumbnail_url") val thumbnailUrl: String? = null,
+    @SerialName("video_url") val videoUrl: String? = null,
+    @SerialName("video_state") val videoState: String = "active",
+)
+
+@Serializable
 data class EtsyPersonalizationOption(
     @SerialName("option_id") val optionId: Long? = null,
     val label: String = "",
@@ -149,6 +157,7 @@ data class EtsyShopListing(
     val inventory: EtsyInventory? = null,
     val images: List<EtsyListingImage>? = null,
     val personalization: EtsyPersonalization? = null, // native questions (includes=Personalization)
+    val videos: List<EtsyListingVideo>? = null, // single video in practice (includes=Videos)
     @SerialName("is_personalizable") val isPersonalizable: Boolean = false,
     @SerialName("personalization_is_required") val personalizationIsRequired: Boolean = false,
     @SerialName("personalization_char_count_max") val personalizationCharCountMax: Int? = null,
@@ -489,7 +498,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         return listOf("active", "draft").flatMap { state ->
             runCatching {
                 etsyGet<EtsyShopListings>(
-                    "$apiBase/shops/$shopId/listings?state=$state&limit=100&includes=Inventory,Personalization",
+                    "$apiBase/shops/$shopId/listings?state=$state&limit=100&includes=Inventory,Personalization,Videos",
                     keystring, secret, access,
                 ).results
             }.getOrElse { emptyList() }
@@ -515,7 +524,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
     suspend fun fetchListing(connectionId: Long, etsyListingId: String): EtsyShopListing? {
         val c = creds(connectionId) ?: return null
         return runCatching {
-            val listing = etsyGet<EtsyShopListing>("$apiBase/listings/$etsyListingId?includes=Images,Personalization", c.keystring, c.secret, c.access)
+            val listing = etsyGet<EtsyShopListing>("$apiBase/listings/$etsyListingId?includes=Images,Personalization,Videos", c.keystring, c.secret, c.access)
             val inv = runCatching {
                 etsyGet<EtsyInventory>("$apiBase/listings/$etsyListingId/inventory", c.keystring, c.secret, c.access)
             }.getOrNull()
@@ -567,6 +576,46 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         if (!resp.status.isSuccess()) return "Etsy ${resp.status.value} uploading $filename: ${resp.bodyAsText().take(300)}" to null
         val id = runCatching { resp.body<EtsyListingImage>().listingImageId }.getOrNull()
         return null to id
+    }
+
+    /** Multipart video upload (uploadListingVideo) — one video per listing;
+     *  a new upload replaces the current one. Returns error or the video_id. */
+    suspend fun etsyUploadVideo(connectionId: Long, etsyListingId: String, bytes: ByteArray, filename: String, mime: String): Pair<String?, Long?> {
+        val c = creds(connectionId) ?: return "Connection not available." to null
+        val resp = http.submitFormWithBinaryData(
+            url = "$apiBase/shops/${c.shopId}/listings/$etsyListingId/videos",
+            formData = io.ktor.client.request.forms.formData {
+                append(
+                    "video", bytes,
+                    io.ktor.http.Headers.build {
+                        append(HttpHeaders.ContentType, mime)
+                        append(HttpHeaders.ContentDisposition, "filename=\"$filename\"")
+                    },
+                )
+                append("name", filename)
+            },
+        ) {
+            headers {
+                append("x-api-key", if (c.secret.isBlank()) c.keystring else "${c.keystring}:${c.secret}")
+                append(HttpHeaders.Authorization, "Bearer ${c.access}")
+            }
+        }
+        if (!resp.status.isSuccess()) return "Etsy ${resp.status.value} uploading video $filename: ${resp.bodyAsText().take(300)}" to null
+        val id = runCatching { resp.body<EtsyListingVideo>().videoId }.getOrNull()
+        return null to id
+    }
+
+    /** Remove the listing's video. */
+    suspend fun etsyDeleteVideo(connectionId: Long, etsyListingId: String, videoId: Long): String? {
+        val c = creds(connectionId) ?: return "Connection not available."
+        val resp = http.request("$apiBase/shops/${c.shopId}/listings/$etsyListingId/videos/$videoId") {
+            method = io.ktor.http.HttpMethod.Delete
+            headers {
+                append("x-api-key", if (c.secret.isBlank()) c.keystring else "${c.keystring}:${c.secret}")
+                append(HttpHeaders.Authorization, "Bearer ${c.access}")
+            }
+        }
+        return if (resp.status.isSuccess()) null else "Etsy ${resp.status.value} deleting video $videoId: ${resp.bodyAsText().take(200)}"
     }
 
     /** Re-rank an existing image (uploadListingImage with listing_image_id, no file). */

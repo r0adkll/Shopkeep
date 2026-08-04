@@ -49,6 +49,7 @@ export type ListingInput = {
   shopSection: string | null;
   personalization: Personalization | null;
   imageDocumentIds: number[];
+  videoDocumentId?: number | null; // one video (Etsy cap); file-backed on the media volume (D21)
   axes: Axis[];
   extras: Extra[];
   disabledSkus: string[];

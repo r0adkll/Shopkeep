@@ -51,6 +51,7 @@ export function defaultInput(product: Product, byId: Map<number, Material>): Lis
     shopSection: null,
     personalization: null,
     imageDocumentIds: [],
+    videoDocumentId: null,
     axes,
     extras: [],
     disabledSkus: [],
@@ -291,6 +292,7 @@ export function ListingEditor({
           <Hint>up to 20 photos + 1 video · first photo is the thumbnail</Hint>
         </SectionTitle>
         <PhotoStrip ids={l.imageDocumentIds} onChange={(imageDocumentIds) => set({ imageDocumentIds })} />
+        <VideoCard id={l.videoDocumentId ?? null} onChange={(videoDocumentId) => set({ videoDocumentId })} />
 
         {/* tags & materials */}
         <SectionTitle>Tags &amp; materials <Hint>tags ≤13 × 20 chars · materials ≤13</Hint></SectionTitle>
@@ -991,17 +993,66 @@ function PhotoStrip({ ids, onChange }: { ids: number[]; onChange: (ids: number[]
             />
           </label>
         )}
-        <div
-          className="flex h-[74px] w-[74px] flex-col items-center justify-center rounded-lg border border-dashed border-line text-[10px] text-mut"
-          title="Video upload arrives with the Etsy connect (Phase 3)"
-        >
-          ▷ video
-          <span className="text-[8px] tracking-wider uppercase">Phase 3</span>
-        </div>
       </div>
       {error && <p className="mt-2 text-xs font-medium text-crit">{error}</p>}
       <p className="mt-2 text-[11px] text-mut">
         Stored in Shopkeep's document store (D12 — pg_dump backs these up too); pushed with the listing once Etsy connects. Hover a photo to promote it to thumbnail or remove it.
+      </p>
+    </div>
+  );
+}
+
+function VideoCard({ id, onChange }: { id: number | null; onChange: (id: number | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const add = async (files: FileList | null) => {
+    const f = files?.[0];
+    if (!f) return;
+    setBusy(true);
+    setError(null);
+    try {
+      onChange(await uploadImage(f, "listing-video"));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-2.5 rounded-xl border border-line bg-panel p-4 shadow-sm">
+      {id != null ? (
+        <div className="flex flex-wrap items-start gap-3">
+          {/* key forces a reload when the doc changes — <video> won't re-read src */}
+          <video key={id} controls preload="metadata" src={documentUrl(id)} className="h-40 max-w-full rounded-lg border border-line bg-black" />
+          <button
+            type="button"
+            title="Remove video"
+            onClick={() => onChange(null)}
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-crit/40 text-crit hover:bg-crit/5"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ) : (
+        <label className={`flex h-20 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-line text-xs text-mut hover:border-accent hover:text-accent ${busy ? "opacity-50" : ""}`}>
+          {busy ? "Uploading…" : "+ Add video · MP4/MOV ≤100 MB (Etsy's cap) · one per listing"}
+          <input
+            type="file"
+            accept="video/mp4,video/quicktime"
+            className="hidden"
+            disabled={busy}
+            onChange={(e) => {
+              void add(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        </label>
+      )}
+      {error && <p className="mt-2 text-xs font-medium text-crit">{error}</p>}
+      <p className="mt-2 text-[11px] text-mut">
+        Videos live on the media volume, not in Postgres (D21) — back up with <code>tar</code> alongside pg_dump; re-pullable from Etsy if lost.
       </p>
     </div>
   );

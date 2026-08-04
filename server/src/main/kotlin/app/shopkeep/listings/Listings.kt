@@ -62,6 +62,7 @@ object ListingsTable : Table("listings") {
     val shopSection = text("shop_section").nullable()
     val personalization = jsonb<Personalization>("personalization", Json.Default).nullable()
     val imageDocumentIds = jsonb<List<Long>>("image_document_ids", Json.Default)
+    val videoDocumentId = long("video_document_id").nullable() // one video (Etsy cap); file-backed doc (D21)
     val etsyListingId = text("etsy_listing_id").nullable()
     val syncState = text("sync_state")
     val platformState = text("platform_state").nullable()
@@ -236,6 +237,7 @@ data class ListingInput(
     val shopSection: String? = null,
     val personalization: Personalization? = null,
     val imageDocumentIds: List<Long> = emptyList(),
+    val videoDocumentId: Long? = null,
     val axes: List<AxisInput> = emptyList(),
     val extras: List<ExtraInput> = emptyList(),
     val disabledSkus: List<String> = emptyList(),
@@ -469,6 +471,7 @@ class ListingRepository(private val products: ProductRepository) {
         it[shopSection] = input.shopSection
         it[personalization] = input.personalization
         it[imageDocumentIds] = input.imageDocumentIds
+        it[videoDocumentId] = input.videoDocumentId
     }
 
     suspend fun get(id: Long): Listing? = dbQuery {
@@ -522,6 +525,7 @@ class ListingRepository(private val products: ProductRepository) {
                 shopSection = row[ListingsTable.shopSection],
                 personalization = row[ListingsTable.personalization],
                 imageDocumentIds = row[ListingsTable.imageDocumentIds],
+                videoDocumentId = row[ListingsTable.videoDocumentId],
                 axes = axes,
                 extras = extras,
                 disabledSkus = configs.filter { !it.enabled }.map { it.sku },

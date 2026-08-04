@@ -18,7 +18,7 @@ const KIND_CHIP: Record<string, [string, string]> = {
   removed: ["REMOVED", "bg-crit/10 text-crit"],
   drift: ["DRIFT — ETSY CHANGED THIS", "bg-warn/10 text-warn"],
 };
-const PULLABLE = new Set(["Title", "Description", "Price", "Quantity", "Tags", "State", "Personalization"]);
+const PULLABLE = new Set(["Title", "Description", "Price", "Quantity", "Tags", "State", "Personalization", "Video"]);
 const EXPAND_THRESHOLD = 90;
 
 /** Word-level LCS diff: removals struck red, additions bold green. */
