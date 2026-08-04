@@ -77,17 +77,20 @@ class VendorPrefillService(private val http: HttpClient, private val materials: 
         }
         guardHost(uri.host)?.let { return PrefillResult(rawUrl, "none", note = it) }
 
-        // 1) Shopify storefront JSON — covers Overture/Polymaker/Bambu Lab.
+        // Variant selectors differ per platform: Shopify uses ?variant=,
+        // Bambu Lab's store uses ?id=.
+        val variantId = Regex("""(?:^|[?&])(?:variant|id)=(\d+)""").find(uri.query ?: "")?.groupValues?.get(1)
+
+        // 1) Shopify storefront JSON — covers Overture/Polymaker-style stores.
         val handle = Regex("""/products/([\w-]+)""").find(uri.path ?: "")?.groupValues?.get(1)
         if (handle != null) {
-            val variantId = Regex("""(?:^|[?&])variant=(\d+)""").find(uri.query ?: "")?.groupValues?.get(1)
             fromShopify(uri, handle, variantId)?.let { return it }
         }
 
-        // 2) Generic HTML: JSON-LD Product, then OpenGraph.
+        // 2) Generic HTML: JSON-LD Product/ProductGroup, then OpenGraph.
         val html = fetchCapped("${uri.scheme}://${uri.host}${uri.rawPath ?: ""}${uri.rawQuery?.let { "?$it" } ?: ""}")
             ?: return PrefillResult(rawUrl, "none", note = "Couldn't fetch the page (some vendors, e.g. Amazon, block server fetches). URL kept.")
-        fromJsonLd(rawUrl, html)?.let { return it }
+        fromJsonLd(rawUrl, html, variantId)?.let { return it }
         fromOg(rawUrl, html)?.let { return it }
         return PrefillResult(rawUrl, "none", note = "No product data found on the page. URL kept.")
     }
@@ -131,17 +134,23 @@ class VendorPrefillService(private val http: HttpClient, private val materials: 
         )
     }
 
-    private suspend fun fromJsonLd(url: String, html: String): PrefillResult? {
+    private suspend fun fromJsonLd(url: String, html: String, variantId: String?): PrefillResult? {
         val scripts = Regex("""<script[^>]*application/ld\+json[^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
             .findAll(html).map { it.groupValues[1] }
         for (s in scripts) {
             val root = runCatching { lenientJson.parseToJsonElement(s) }.getOrNull() ?: continue
-            val product = findProduct(root) ?: continue
-            val title = product.str("name") ?: continue
-            val brand = when (val b = product["brand"]) {
-                is JsonObject -> b.str("name")
-                else -> b?.jsonPrimitive?.content
-            }
+            val node = findProduct(root) ?: continue
+            // ProductGroup (e.g. Bambu Lab): per-color variant Products under
+            // hasVariant, keyed by sku == the URL's variant id.
+            val groupName = if (typeOf(node)?.contains("ProductGroup") == true) node.str("name") else null
+            val product = if (groupName != null) {
+                val variants = (node["hasVariant"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: emptyList()
+                variants.firstOrNull { it.str("sku") == variantId }
+                    ?: variants.firstOrNull { (it["offers"] as? JsonObject)?.str("url")?.contains("=$variantId") == true }
+                    ?: variants.firstOrNull() ?: node
+            } else node
+            val title = product.str("name") ?: groupName ?: continue
+            val brand = brandOf(node) ?: brandOf(product)
             val offer = when (val o = product["offers"]) {
                 is JsonArray -> o.firstOrNull() as? JsonObject
                 is JsonObject -> o
@@ -151,16 +160,30 @@ class VendorPrefillService(private val http: HttpClient, private val materials: 
             return heuristics(
                 url = url, source = "jsonld", title = title, brand = brand,
                 priceMinor = price?.let { Math.round(it * 100) }, currency = offer?.str("priceCurrency"),
-                grams = null, colorName = product.str("color"),
+                grams = null, colorName = product.str("color") ?: variantColor(groupName, product.str("name")),
             )
         }
         return null
     }
 
+    /** "PLA Basic - Cyan (10603) / Refill / 1kg" with group "PLA Basic" -> "Cyan". */
+    private fun variantColor(group: String?, name: String?): String? {
+        if (group == null || name == null || !name.startsWith("$group - ")) return null
+        return name.removePrefix("$group - ").substringBefore("/")
+            .replace(Regex("""\(\s*[\w-]+\s*\)"""), "").trim().takeIf { it.isNotBlank() }
+    }
+
+    private fun brandOf(o: JsonObject): String? = when (val b = o["brand"]) {
+        is JsonObject -> b.str("name")
+        else -> (b as? kotlinx.serialization.json.JsonPrimitive)?.content
+    }
+
+    private fun typeOf(o: JsonObject): String? =
+        o["@type"]?.let { t -> if (t is JsonArray) t.joinToString { x -> x.jsonPrimitive.content } else t.jsonPrimitive.content }
+
     private fun findProduct(el: JsonElement): JsonObject? = when (el) {
         is JsonObject -> {
-            val type = el["@type"]?.let { t -> if (t is JsonArray) t.joinToString { x -> x.jsonPrimitive.content } else t.jsonPrimitive.content }
-            if (type?.contains("Product") == true) el
+            if (typeOf(el)?.contains("Product") == true) el
             else (el["@graph"] as? JsonArray)?.firstNotNullOfOrNull { findProduct(it) }
         }
         is JsonArray -> el.firstNotNullOfOrNull { findProduct(it) }
