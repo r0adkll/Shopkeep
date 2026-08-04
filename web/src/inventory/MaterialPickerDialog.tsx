@@ -78,8 +78,10 @@ export function MaterialPickerDialog({
               className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent/5 ${i % 2 ? "" : "bg-panel2/60"}`}
             >
               <span className="h-4 w-4 flex-none rounded-full border border-line" style={{ background: materialColor(m) ?? "var(--color-panel2)" }} />
-              <span className="min-w-0 flex-1 truncate">{m.name}</span>
-              {m.brand && <span className="max-w-28 flex-none truncate text-[11px] text-mut">{m.brand}</span>}
+              <span className="min-w-0 flex-1 truncate">
+                {m.name}
+                {m.brand && <span className="ml-1.5 text-[11px] text-mut">{m.brand}</span>}
+              </span>
               <span className="flex-none text-[11px] text-mut">{m.type}</span>
               <span className={`w-20 flex-none text-right font-mono text-[11px] ${m.stock.available <= 0 ? "text-warn" : "text-ink2"}`}>
                 {formatQty(m.stock.available)} {m.unit}
