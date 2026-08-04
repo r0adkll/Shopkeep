@@ -469,7 +469,6 @@ function OrderDetailPanel(props: {
                       <br />{d.shipLine1}{d.shipLine2 ? `, ${d.shipLine2}` : ""}
                       <br />{d.shipCity}, {d.shipState} {d.shipZip}
                       <br />{d.shipCountry}
-                      {d.paymentMethod && <div className="mt-1 text-[11px] text-mut">{d.paymentMethod}</div>}
                     </div>
                     <span className="ml-auto flex flex-none flex-col items-end gap-1">
                       <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider ${d.platformPaid ? "bg-good/10 text-good" : "bg-panel2 text-ink2"}`}>
