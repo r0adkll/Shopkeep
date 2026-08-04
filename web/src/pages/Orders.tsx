@@ -427,7 +427,7 @@ function OrderDetailPanel(props: {
 
               {(d.shipLine1 || d.shipCity) && (
                 <div className="mt-4">
-                  <div className={SECTION_H}>
+                  <div className={`${SECTION_H} flex items-center`}>
                     Ship to
                     <button
                       onClick={() => {
