@@ -374,7 +374,7 @@ function OrderDetailPanel(props: {
         {/* header */}
         <div className="border-b border-line px-5 pt-4 pb-3">
           <div className="flex items-center gap-2">
-            <span className="rounded bg-panel2 px-1.5 py-0.5 text-[8.5px] font-extrabold tracking-wider text-ink2">ETSY</span>
+            <span className="rounded bg-[#F1641E] px-1.5 py-0.5 text-[8.5px] font-extrabold tracking-wider text-white">ETSY</span>
             <span className="min-w-0 truncate text-[16px] font-bold">{o?.buyerName ?? "…"}</span>
             <span className="ml-auto flex gap-1">
               <button onClick={() => step(-1)} title="previous (←)" className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-panel2 text-ink2 hover:border-accent hover:text-ink"><ChevronLeft size={14} /></button>
