@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { ChevronLeft, ChevronRight, Copy, Gift, Link2, Paperclip, RefreshCw, Settings2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, ExternalLink, Gift, Link2, Paperclip, RefreshCw, Settings2, X } from "lucide-react";
 import { documentUrl, uploadImage } from "../catalog/api";
 import { NavTabs, Wordmark } from "../ui";
 
@@ -384,6 +384,16 @@ function OrderDetailPanel(props: {
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-ink2">
             <span className="font-mono">#{o?.platformOrderId}</span>
+            {o && (
+              <a
+                href={`https://www.etsy.com/your/orders/sold?order_id=${o.platformOrderId}`}
+                target="_blank" rel="noreferrer"
+                title="Open in Etsy Shop Manager — buyer username & conversation live there (the API doesn't expose them)"
+                className="flex items-center gap-1 rounded-md border border-accent/40 px-2 py-0.5 text-[11px] font-semibold text-accent hover:bg-accent/5"
+              >
+                <ExternalLink size={11} /> Etsy
+              </a>
+            )}
             {o?.placedAt && <span>placed {age(o.placedAt)} ago</span>}
             <span className="ml-auto flex items-center gap-1.5">
               <span className="text-[10px] font-extrabold tracking-widest text-mut">LANE</span>
