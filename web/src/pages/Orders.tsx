@@ -530,24 +530,9 @@ function OrderDetailPanel(props: {
                     )}
                     <div className="mt-1.5 flex items-center gap-2 border-t border-dotted border-line/60 pt-1 text-[11px]">
                       {l.matchedSku ? (
-                        <>
-                          <span className="font-mono font-semibold text-good">✓ {l.matchedSku}</span>
-                          <span className="ml-auto text-[10px] font-semibold text-accent opacity-0 group-hover:opacity-100">open listing ↗</span>
-                        </>
+                        <span className="font-mono font-semibold text-good">✓ {l.matchedSku}</span>
                       ) : l.matchedListing ? (
-                        <>
-                          <span className="font-mono font-semibold text-good">✓ via listing{l.needsReview ? <b className="text-warn"> · needs review</b> : ""}</span>
-                          <button
-                            type="button"
-                            title="Release this line's reservations and resolve again from the listing's current mappings — use after fixing the listing"
-                            disabled={reresolve.isPending}
-                            onClick={(e) => { e.stopPropagation(); reresolve.mutate(l.id); }}
-                            className="ml-auto flex items-center gap-1 rounded-md border border-line px-2 py-0.5 text-[10px] font-semibold text-ink2 hover:border-accent hover:text-accent disabled:opacity-50"
-                          >
-                            <RefreshCw size={10} className={reresolve.isPending ? "animate-spin" : ""} /> re-resolve
-                          </button>
-                          <span className="text-[10px] font-semibold text-accent opacity-0 group-hover:opacity-100">open listing ↗</span>
-                        </>
+                        <span className="font-mono font-semibold text-good">✓ via listing{l.needsReview ? <b className="text-warn"> · needs review</b> : ""}</span>
                       ) : (
                         <>
                           <span className="font-mono text-mut">raw sku: {l.rawSku ?? "—"}</span>
@@ -567,7 +552,20 @@ function OrderDetailPanel(props: {
                         {(l.reviewReasons.length > 0 ? l.reviewReasons : ["an option couldn't be resolved when this line was matched — re-resolve to see current details"]).map((r, i) => (
                           <div key={i} className="mt-0.5 text-[11px] leading-snug text-ink2">· {r}</div>
                         ))}
-                        <div className="mt-1 text-[10px] text-mut">Fix the mapping on the listing (or its product's designs), then <b>re-resolve</b> above — reservations are released and redone from the new answer.</div>
+                        <div className="mt-1 text-[10px] text-mut">Fix the mapping on the listing (or its product's designs), then <b>re-resolve</b> — reservations are released and redone from the new answer.</div>
+                      </div>
+                    )}
+                    {l.matchedListing && (
+                      <div className="mt-1.5 flex justify-end">
+                        <button
+                          type="button"
+                          title="Release this line's reservations and resolve again from the listing's current mappings — use after fixing the listing"
+                          disabled={reresolve.isPending}
+                          onClick={(e) => { e.stopPropagation(); reresolve.mutate(l.id); }}
+                          className="flex items-center gap-1 rounded-md border border-line px-2 py-0.5 text-[10px] font-semibold text-ink2 hover:border-accent hover:text-accent disabled:opacity-50"
+                        >
+                          <RefreshCw size={10} className={reresolve.isPending ? "animate-spin" : ""} /> re-resolve
+                        </button>
                       </div>
                     )}
                   </div>
