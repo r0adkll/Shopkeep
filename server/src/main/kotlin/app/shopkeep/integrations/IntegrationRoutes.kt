@@ -21,6 +21,9 @@ data class StartEtsyRequest(val keystring: String, val sharedSecret: String = ""
 @Serializable
 data class AddNoteRequest(val body: String = "", val documentIds: List<Long> = emptyList())
 
+@kotlinx.serialization.Serializable
+data class MatchLineRequest(val listingId: Long, val remember: Boolean = true)
+
 @Serializable
 data class StartEtsyResponse(val authUrl: String, val redirectUri: String)
 
@@ -30,6 +33,20 @@ fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService
         get("/integrations/connections") { call.respond(connections.list()) }
 
         get("/orders") { call.respond(sync.listOrders()) }
+
+        // Phase 4 matching tooling: on-demand retro-match sweep + manual match.
+        post("/orders/rematch") { call.respond(sync.rematchAll()) }
+
+        post("/orders/lines/{id}/match") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            val req = call.receive<MatchLineRequest>()
+            val r = id?.let { sync.matchLine(it, req.listingId, req.remember) }
+            when {
+                r == null -> call.respond(HttpStatusCode.NotFound, ApiError("Line or listing not found."))
+                !r.ok -> call.respond(HttpStatusCode.UnprocessableEntity, ApiError(r.error ?: "Couldn't match."))
+                else -> call.respond(r)
+            }
+        }
 
         get("/orders/{id}") {
             val detail = call.parameters["id"]?.toLongOrNull()?.let { sync.orderDetail(it) }

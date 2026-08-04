@@ -548,6 +548,14 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         else "Etsy ${resp.status.value} on $path: ${resp.bodyAsText().take(300)}"
     }
 
+    /** One receipt with transactions — rematch backfill for early-ingest lines. */
+    suspend fun fetchReceipt(connectionId: Long, receiptId: String): EtsyReceipt? {
+        val c = creds(connectionId) ?: return null
+        return runCatching {
+            etsyGet<EtsyReceipt>("$apiBase/shops/${c.shopId}/receipts/$receiptId", c.keystring, c.secret, c.access)
+        }.getOrNull()
+    }
+
     /** Plain CDN download (listing photos are public URLs). */
     suspend fun download(url: String): ByteArray? =
         runCatching { http.get(url).body<ByteArray>() }.getOrNull()

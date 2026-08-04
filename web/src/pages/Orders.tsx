@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { ChevronLeft, ChevronRight, Copy, Gift, Paperclip, Settings2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Gift, Link2, Paperclip, RefreshCw, Settings2, X } from "lucide-react";
 import { documentUrl, uploadImage } from "../catalog/api";
 import { NavTabs, Wordmark } from "../ui";
 
@@ -156,6 +156,16 @@ export function OrdersPage() {
   const [overLane, setOverLane] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [rematchMsg, setRematchMsg] = useState<string | null>(null);
+  const rematch = useMutation({
+    mutationFn: () => jsonFetch<{ backfilled: number; matched: number }>("/api/v1/orders/rematch", { method: "POST" }),
+    onSuccess: (r) => {
+      setRematchMsg(`${r.backfilled} listing id${r.backfilled === 1 ? "" : "s"} backfilled · ${r.matched} line${r.matched === 1 ? "" : "s"} matched`);
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["order"] });
+    },
+    onError: (e) => setRematchMsg(e instanceof Error ? e.message : "Re-run failed"),
+  });
 
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
   const isAdmin = me.data.role === "ADMIN";
@@ -175,14 +185,25 @@ export function OrdersPage() {
         <Wordmark />
         <NavTabs active="Orders" />
         {isAdmin && (
-          <button
-            onClick={() => setEditing((e) => !e)}
-            className={`ml-auto flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-semibold transition-colors ${
-              editing ? "border-accent text-accent" : "border-line text-ink2 hover:text-ink"
-            }`}
-          >
-            <Settings2 size={15} /> Customize lanes…
-          </button>
+          <span className="ml-auto flex items-center gap-2.5">
+            {rematchMsg && <span className="text-xs text-ink2">{rematchMsg}</span>}
+            <button
+              onClick={() => rematch.mutate()}
+              disabled={rematch.isPending}
+              title="Backfill listing ids from Etsy receipts, then retro-match unmatched lines against activated listings and remembered matches"
+              className="flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-1.5 text-sm font-semibold text-ink2 transition-colors hover:text-ink disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={rematch.isPending ? "animate-spin" : ""} /> Re-run matching
+            </button>
+            <button
+              onClick={() => setEditing((e) => !e)}
+              className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-semibold transition-colors ${
+                editing ? "border-accent text-accent" : "border-line text-ink2 hover:text-ink"
+              }`}
+            >
+              <Settings2 size={15} /> Customize lanes…
+            </button>
+          </span>
         )}
         <span className={`${isAdmin ? "" : "ml-auto "}text-sm text-ink2`}>{me.data.displayName}</span>
       </header>
@@ -306,6 +327,7 @@ function OrderDetailPanel(props: {
     queryKey: ["order", orderId],
     queryFn: () => jsonFetch<OrderDetail>(`/api/v1/orders/${orderId}`),
   });
+  const [matching, setMatching] = useState<OrderLine | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -336,6 +358,17 @@ function OrderDetailPanel(props: {
   return (
     <>
       <div className="fixed inset-0 z-30 bg-black/30" onClick={onClose} />
+      {matching && (
+        <MatchDialog
+          line={matching}
+          onClose={() => setMatching(null)}
+          onMatched={() => {
+            setMatching(null);
+            qc.invalidateQueries({ queryKey: ["order", orderId] });
+            qc.invalidateQueries({ queryKey: ["orders"] });
+          }}
+        />
+      )}
       <aside className="fixed top-0 right-0 bottom-0 z-40 flex w-[min(480px,94vw)] flex-col border-l border-line bg-panel shadow-2xl">
         {/* header */}
         <div className="border-b border-line px-5 pt-4 pb-3">
@@ -467,7 +500,16 @@ function OrderDetailPanel(props: {
                       ) : l.matchedListing ? (
                         <span className="font-mono font-semibold text-good">✓ via listing{l.needsReview ? " · needs review" : ""}</span>
                       ) : (
-                        <span className="font-mono text-mut">raw sku: {l.rawSku ?? "—"}</span>
+                        <>
+                          <span className="font-mono text-mut">raw sku: {l.rawSku ?? "—"}</span>
+                          <button
+                            type="button"
+                            onClick={() => setMatching(l)}
+                            className="ml-auto flex items-center gap-1 rounded-md border border-accent/40 px-2 py-0.5 text-[10.5px] font-semibold text-accent hover:bg-accent/5"
+                          >
+                            <Link2 size={11} /> Match…
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -581,6 +623,74 @@ function OrderDetailPanel(props: {
 }
 
 /** Shopkeep-native private notes — text + photos; nothing syncs to Etsy. */
+/** Manual match: pick the canonical listing this line sells. Remembering
+ *  stores platform-listing-id -> listing so future lines match on arrival. */
+function MatchDialog({ line, onClose, onMatched }: { line: OrderLine; onClose: () => void; onMatched: () => void }) {
+  const [q, setQ] = useState("");
+  const [remember, setRemember] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const listings = useQuery({
+    queryKey: ["listings-for-match"],
+    queryFn: () => jsonFetch<{ id: number; etsyListingId: string | null; archived: boolean; input: { title: string; state: string } }[]>("/api/v1/listings"),
+  });
+  const match = useMutation({
+    mutationFn: (listingId: number) =>
+      jsonFetch<{ ok: boolean; sweptSiblings: number }>(`/api/v1/orders/lines/${line.id}/match`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId, remember }),
+      }),
+    onSuccess: () => onMatched(),
+    onError: (e) => setErr(e instanceof Error ? e.message : "Match failed."),
+  });
+  const rows = (listings.data ?? []).filter((l) => !l.archived && l.input.title.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/30" onClick={onClose} />
+      <div className="fixed inset-x-0 top-16 z-50 mx-auto flex max-h-[70vh] w-[min(520px,94vw)] flex-col rounded-2xl border border-line bg-bg shadow-2xl">
+        <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
+          <span className="min-w-0 flex-1 truncate text-[14px] font-bold">Match “{line.title}”</span>
+          <button onClick={onClose} className="rounded-md border border-line p-1 text-ink2 hover:text-ink"><X size={15} /></button>
+        </div>
+        <div className="border-b border-line px-5 py-3">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search your listings…"
+            className="w-full rounded-md border border-line bg-panel2 px-3 py-1.5 text-sm outline-none placeholder:text-mut focus:border-accent"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto px-3 py-2">
+          {listings.isLoading && <p className="px-2 py-4 text-sm text-mut">Loading listings…</p>}
+          {!listings.isLoading && rows.length === 0 && <p className="px-2 py-4 text-center text-sm text-mut">No listings match.</p>}
+          {rows.map((l, i) => (
+            <button
+              key={l.id}
+              type="button"
+              disabled={match.isPending}
+              onClick={() => match.mutate(l.id)}
+              className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent/5 disabled:opacity-50 ${i % 2 ? "" : "bg-panel2/60"}`}
+            >
+              <span className="min-w-0 flex-1 truncate">{l.input.title}</span>
+              <span className="flex-none text-[10px] font-bold tracking-wider text-mut uppercase">{l.input.state}</span>
+              {l.etsyListingId && <span className="flex-none font-mono text-[10px] text-mut">#{l.etsyListingId}</span>}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3">
+          <label className="flex items-center gap-1.5 text-xs text-ink2">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="accent-accent" />
+            remember — future orders from this Etsy listing match automatically
+          </label>
+          {match.isPending && <span className="ml-auto text-xs text-mut">Matching + reserving…</span>}
+          {err && <span className="ml-auto text-xs text-crit">{err}</span>}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function NotesSection({ orderId, notes, onAdded }: { orderId: number; notes: OrderNote[]; onAdded: () => void }) {
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);

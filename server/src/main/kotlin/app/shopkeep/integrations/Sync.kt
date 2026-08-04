@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.andWhere
+import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertIgnore
 import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
@@ -89,6 +90,13 @@ object OrderLinesTable : Table("order_lines") {
     override val primaryKey = PrimaryKey(id)
 }
 
+/** Remembered manual matches: platform listing id -> canonical listing. */
+object ListingMatchesTable : Table("listing_matches") {
+    val platformListingId = text("platform_listing_id")
+    val listingId = long("listing_id")
+    override val primaryKey = PrimaryKey(platformListingId)
+}
+
 object OrderEventsTable : Table("order_events") {
     val id = long("id").autoIncrement()
     val orderId = long("order_id")
@@ -108,6 +116,12 @@ object OrderNotesTable : Table("order_notes") {
     val createdAt = timestampWithTimeZone("created_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
+
+@Serializable
+data class MatchLineResult(val ok: Boolean, val sweptSiblings: Int, val error: String? = null)
+
+@Serializable
+data class RematchResult(val backfilled: Int, val matched: Int)
 
 @Serializable
 data class LineColor(val hex: String?, val name: String)
@@ -455,10 +469,22 @@ class SyncService(
      *  ignore / unknown) leave a gap and flag the line for review. */
     private suspend fun resolveImportedLine(txn: EtsyTransaction): ImportedResolution? {
         val etsyId = txn.listingId?.toString() ?: return null
-        val listingRow = dbQuery {
-            ListingsTable.selectAll().where { ListingsTable.etsyListingId eq etsyId }.singleOrNull()
-        } ?: return null
-        val listing = listings.get(listingRow[ListingsTable.id]) ?: return null
+        val targetId = resolvableListingId(etsyId) ?: return null
+        val listing = listings.get(targetId) ?: return null
+        return resolveWithListing(listing, txn)
+    }
+
+    /** Which canonical listing handles this platform listing id, if any —
+     *  direct etsy link first, then a remembered manual match. */
+    private suspend fun resolvableListingId(etsyId: String): Long? = dbQuery {
+        ListingsTable.selectAll().where { ListingsTable.etsyListingId eq etsyId }.singleOrNull()
+            ?.get(ListingsTable.id)
+            ?: ListingMatchesTable.selectAll().where { ListingMatchesTable.platformListingId eq etsyId }.singleOrNull()
+                ?.get(ListingMatchesTable.listingId)
+    }
+
+    /** Resolve a line against a specific listing (manual match bypasses lookup). */
+    suspend fun resolveWithListing(listing: app.shopkeep.listings.Listing, txn: EtsyTransaction): ImportedResolution? {
         val product = products.get(listing.input.productId) ?: return null
         var review = false
         val selections = mutableListOf<app.shopkeep.catalog.ConfigSelection>()
@@ -583,35 +609,116 @@ class SyncService(
                 variations = l[OrderLinesTable.variations] + l[OrderLinesTable.personalization],
             )
             val r = resolveImportedLine(txn) ?: continue
-            val order = dbQuery {
-                OrdersTable.selectAll().where { OrdersTable.id eq l[OrderLinesTable.orderId] }.single()
-            }
-            // Skip dead/completed orders: nothing to reserve anymore.
-            val dead = order[OrdersTable.platformStatus] in setOf("canceled", "fully refunded")
-            val short = if (!dead && order[OrdersTable.completedAt] == null) {
-                reserveResolved(r, l[OrderLinesTable.quantity], "Order #${order[OrdersTable.platformOrderId]}")
-            } else false
-            dbQuery {
-                OrderLinesTable.update({ OrderLinesTable.id eq l[OrderLinesTable.id] }) {
-                    it[matchedListingId] = r.listingId
-                    it[resolvedSelections] = r.selections
-                    it[needsReview] = r.needsReview
-                }
-                val stillUnmatched = OrderLinesTable.selectAll()
-                    .where { OrderLinesTable.orderId eq order[OrdersTable.id] }
-                    .any { row -> row[OrderLinesTable.listingConfigurationId] == null && row[OrderLinesTable.matchedListingId] == null }
-                OrdersTable.update({ OrdersTable.id eq order[OrdersTable.id] }) {
-                    if (short) it[flagShort] = true
-                }
-                OrderEventsTable.insert {
-                    it[OrderEventsTable.orderId] = order[OrdersTable.id]
-                    it[fromCategory] = null
-                    it[toCategory] = if (stillUnmatched) "line matched via imported listing" else "matched via imported listing — materials reserved"
-                }
-            }
+            applyResolution(l, r, "matched via imported listing")
             count++
         }
         return count
+    }
+
+    /** Shared tail of every match path: reserve (live orders only), stamp the
+     *  line, flag shortfalls, leave an event. */
+    private suspend fun applyResolution(l: org.jetbrains.exposed.sql.ResultRow, r: ImportedResolution, how: String) {
+        val order = dbQuery {
+            OrdersTable.selectAll().where { OrdersTable.id eq l[OrderLinesTable.orderId] }.single()
+        }
+        // Skip dead/completed orders: nothing to reserve anymore.
+        val dead = order[OrdersTable.platformStatus] in setOf("canceled", "fully refunded")
+        val short = if (!dead && order[OrdersTable.completedAt] == null) {
+            reserveResolved(r, l[OrderLinesTable.quantity], "Order #${order[OrdersTable.platformOrderId]}")
+        } else false
+        dbQuery {
+            OrderLinesTable.update({ OrderLinesTable.id eq l[OrderLinesTable.id] }) {
+                it[matchedListingId] = r.listingId
+                it[resolvedSelections] = r.selections
+                it[needsReview] = r.needsReview
+            }
+            val stillUnmatched = OrderLinesTable.selectAll()
+                .where { OrderLinesTable.orderId eq order[OrdersTable.id] }
+                .any { row -> row[OrderLinesTable.listingConfigurationId] == null && row[OrderLinesTable.matchedListingId] == null }
+            if (short) {
+                OrdersTable.update({ OrdersTable.id eq order[OrdersTable.id] }) { it[flagShort] = true }
+            }
+            OrderEventsTable.insert {
+                it[OrderEventsTable.orderId] = order[OrdersTable.id]
+                it[fromCategory] = null
+                it[toCategory] = if (stillUnmatched) "line $how" else "$how — materials reserved"
+            }
+        }
+    }
+
+    /** Manual match: resolve one line against a chosen listing; optionally
+     *  remember platform listing id -> listing and sweep siblings. */
+    suspend fun matchLine(lineId: Long, listingId: Long, remember: Boolean): MatchLineResult? {
+        val l = dbQuery {
+            OrderLinesTable.selectAll().where { OrderLinesTable.id eq lineId }.singleOrNull()
+        } ?: return null
+        if (l[OrderLinesTable.matchedListingId] != null || l[OrderLinesTable.listingConfigurationId] != null) {
+            return MatchLineResult(false, 0, "Line is already matched.")
+        }
+        val listing = listings.get(listingId) ?: return null
+        val txn = EtsyTransaction(
+            listingId = null,
+            quantity = l[OrderLinesTable.quantity],
+            variations = l[OrderLinesTable.variations] + l[OrderLinesTable.personalization],
+        )
+        val r = resolveWithListing(listing, txn) ?: return MatchLineResult(false, 0, "That listing's product couldn't be loaded.")
+        applyResolution(l, r, "matched manually")
+        var swept = 0
+        val pid = l[OrderLinesTable.platformListingId]
+        if (remember && pid != null) {
+            dbQuery {
+                ListingMatchesTable.deleteWhere { ListingMatchesTable.platformListingId eq pid }
+                ListingMatchesTable.insert {
+                    it[platformListingId] = pid
+                    it[ListingMatchesTable.listingId] = listingId
+                }
+            }
+            // sibling lines from the same platform listing now resolve too
+            swept = retroMatch(listingId, pid)
+        }
+        return MatchLineResult(true, swept, null)
+    }
+
+    /** Re-run matching on demand: backfill platform listing ids that early
+     *  ingests never stamped (from the Etsy receipt), then retro-match every
+     *  unmatched line whose platform listing resolves to a canonical listing. */
+    suspend fun rematchAll(): RematchResult {
+        var backfilled = 0
+        val missing = dbQuery {
+            OrderLinesTable.selectAll()
+                .where { OrderLinesTable.platformListingId.isNull() }
+                .andWhere { OrderLinesTable.matchedListingId.isNull() }
+                .andWhere { OrderLinesTable.listingConfigurationId.isNull() }
+                .map { Triple(it[OrderLinesTable.id], it[OrderLinesTable.orderId], it[OrderLinesTable.platformRef]) }
+        }
+        val orderInfo = missing.map { it.second }.distinct().associateWith { oid ->
+            dbQuery {
+                OrdersTable.selectAll().where { OrdersTable.id eq oid }.singleOrNull()
+                    ?.let { it[OrdersTable.connectionId] to it[OrdersTable.platformOrderId] }
+            }
+        }
+        val receipts = mutableMapOf<Long, EtsyReceipt?>()
+        for ((lineId, oid, ref) in missing) {
+            val (connId, receiptId) = orderInfo[oid] ?: continue
+            val receipt = receipts.getOrPut(oid) { connections.fetchReceipt(connId, receiptId) } ?: continue
+            val txn = receipt.transactions.firstOrNull { it.transactionId.toString() == ref } ?: continue
+            val pid = txn.listingId?.toString() ?: continue
+            dbQuery { OrderLinesTable.update({ OrderLinesTable.id eq lineId }) { it[platformListingId] = pid } }
+            backfilled++
+        }
+        var matched = 0
+        val pids = dbQuery {
+            OrderLinesTable.selectAll()
+                .where { OrderLinesTable.platformListingId.isNotNull() }
+                .andWhere { OrderLinesTable.matchedListingId.isNull() }
+                .andWhere { OrderLinesTable.listingConfigurationId.isNull() }
+                .mapNotNull { it[OrderLinesTable.platformListingId] }.distinct()
+        }
+        for (pid in pids) {
+            val target = resolvableListingId(pid) ?: continue
+            matched += retroMatch(target, pid)
+        }
+        return RematchResult(backfilled, matched)
     }
 
     /** Reserve the line's full bill of materials: recipe slots + listing extras. */
