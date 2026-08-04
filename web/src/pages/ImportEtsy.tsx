@@ -4,6 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, Loader2, RotateCw, Trash2 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { type Material, inventoryApi } from "../inventory/api";
+import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
 import { type ProductSummary, catalogApi } from "../catalog/api";
 import { NavTabs, Skeleton, Wordmark } from "../ui";
 
@@ -294,7 +295,11 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
   });
   const [error, setError] = useState<string | null>(null);
   const [activated, setActivated] = useState<number | null>(null);
+  const [picker, setPicker] = useState<{ ai: number; vi: number } | null>(null);
   const matById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
+
+  const resolveValue = (ai: number, vi: number, patch: Partial<ValueMapping>) =>
+    setAxis(ai, (a) => ({ ...a, values: a.values.map((x, xi) => (xi === vi ? { ...x, materialId: null, designId: null, variantId: null, ...patch } : x)) }));
 
   const resolvedCount = mapping.axes.filter((a) => axisMode(a) !== "modifier").flatMap((a) => a.values)
     .filter((v) => v.resolution !== "unmapped" && !(v.resolution === "material" && v.materialId == null)
@@ -401,6 +406,30 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
                   <div key={v.value} className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-xs ${vi % 2 ? "" : "bg-panel2"}`}>
                     <span className="w-36 flex-none truncate" title={v.value}>{v.value}</span>
                     <span className="flex-none text-[10px] text-mut">→</span>
+                    {axisMode(ax) === "materials" ? (
+                      <button
+                        type="button"
+                        onClick={() => setPicker({ ai: i, vi })}
+                        className={`flex min-w-0 flex-1 items-center gap-1.5 rounded border bg-panel px-2 py-1 text-left text-xs hover:border-accent ${v.resolution === "unmapped" ? "border-warn" : "border-line"}`}
+                      >
+                        {v.resolution === "material" && v.materialId != null ? (
+                          <>
+                            <span className="h-2.5 w-2.5 flex-none rounded-full border border-line"
+                              style={{ background: matById.get(v.materialId)?.attributes?.color || "var(--color-panel2)" }} />
+                            <span className="truncate">
+                              {matById.get(v.materialId)?.brand && <span className="text-mut">{matById.get(v.materialId)!.brand} </span>}
+                              {matById.get(v.materialId)?.name ?? `material ${v.materialId}`}
+                            </span>
+                          </>
+                        ) : v.resolution === "review" ? (
+                          <span className="text-ink2">review per order</span>
+                        ) : v.resolution === "ignore" ? (
+                          <span className="text-ink2">no material impact</span>
+                        ) : (
+                          <span className="text-mut">— pick a material…</span>
+                        )}
+                      </button>
+                    ) : (
                     <select
                       value={
                         v.resolution === "material" ? String(v.materialId ?? "")
@@ -453,17 +482,10 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
                           {(variants.data ?? []).map((d) => <option key={`v${d.id}`} value={`v:${d.id}`}>{d.name}</option>)}
                         </>
                       )}
-                      {axisMode(ax) === "materials" && (
-                        <>
-                          <option value="unmapped">— pick a material…</option>
-                          {materials.filter((m) => !m.archived).map((m) => (
-                            <option key={m.id} value={m.id}>{m.name}</option>
-                          ))}
-                        </>
-                      )}
                       <option value="review">review per order (human picks at build time)</option>
                       <option value="ignore">no material impact</option>
                     </select>
+                    )}
                     <span
                       className="h-2.5 w-2.5 flex-none rounded-full border border-line"
                       style={{ background: (v.materialId && matById.get(v.materialId)?.attributes?.color) || "transparent" }}
@@ -476,6 +498,16 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
         </div>
         {totalCount === 0 && <p className="text-xs text-mut italic">Assign at least one axis to a recipe slot above.</p>}
       </div>
+      {picker && mapping.axes[picker.ai]?.values[picker.vi] && (
+        <MaterialPickerDialog
+          all={materials}
+          title={`“${mapping.axes[picker.ai].values[picker.vi].value}” → material`}
+          onPick={(id) => { resolveValue(picker.ai, picker.vi, { resolution: "material", materialId: id }); setPicker(null); }}
+          onReview={() => { resolveValue(picker.ai, picker.vi, { resolution: "review" }); setPicker(null); }}
+          onIgnore={() => { resolveValue(picker.ai, picker.vi, { resolution: "ignore" }); setPicker(null); }}
+          onClose={() => setPicker(null)}
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-mono text-xs text-ink2">{resolvedCount}/{totalCount} resolved</span>
