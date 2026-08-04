@@ -126,7 +126,7 @@ const shipByLabel = (iso: string) => {
 };
 const shipByTone = (iso: string) => {
   const d = daysUntil(iso);
-  return d < 0 ? "bg-crit/10 text-crit" : d <= 1 ? "bg-warn/10 text-warn" : "bg-panel2 text-ink2";
+  return d < 0 ? "bg-crit/15 text-crit" : d <= 1 ? "bg-warn/15 text-warn" : "bg-good/10 text-good";
 };
 // deadline-first: soonest ship-by leads; no-deadline cards fall back to oldest placed
 const byDeadline = (a: Order, b: Order) =>
@@ -447,7 +447,7 @@ function OrderDetailPanel(props: {
             </span>
           </div>
           {o?.shipBy && (
-            <div className="mt-1.5">
+            <div className="mt-1">
               <span
                 title="Etsy expected ship date"
                 className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider uppercase ${shipByTone(o.shipBy)}`}
@@ -966,7 +966,7 @@ function OrderCard(props: {
         </span>
       </div>
       {o.shipBy && (
-        <div className="mt-1">
+        <div className="mt-0.5">
           <span
             title={`Etsy expected ship date: ${new Date(o.shipBy).toLocaleDateString()}`}
             className={`rounded-full px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider whitespace-nowrap uppercase ${shipByTone(o.shipBy)}`}
