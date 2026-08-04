@@ -17,6 +17,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.notInList
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
@@ -72,6 +73,7 @@ object OrdersTable : Table("orders") {
     val platformPaid = bool("platform_paid")
     val platformShipped = bool("platform_shipped")
     val platformStatus = text("platform_status")
+    val shipBy = timestampWithTimeZone("ship_by").nullable()
     val archivedAt = timestampWithTimeZone("archived_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
@@ -184,6 +186,7 @@ data class OrderView(
     val flagShort: Boolean,
     val flagAdhoc: Boolean,
     val platformStatus: String,
+    val shipBy: String? = null, // Etsy expected_ship_date — the queue's real deadline
     val archived: Boolean = false,
     val lines: List<OrderLineView>,
 )
@@ -311,6 +314,8 @@ class SyncService(
                     it[totalMinor] = receipt.grandtotal.minor
                     it[currency] = receipt.grandtotal.currencyCode
                     it[placedAt] = OffsetDateTime.ofInstant(Instant.ofEpochSecond(receipt.createdTimestamp), ZoneOffset.UTC)
+                    it[shipBy] = receipt.transactions.mapNotNull { t -> t.expectedShipDate }.minOrNull()
+                        ?.let { e -> OffsetDateTime.ofInstant(Instant.ofEpochSecond(e), ZoneOffset.UTC) }
                     it[shipName] = receipt.name.takeIf { s -> s.isNotBlank() }
                     it[shipLine1] = receipt.firstLine
                     it[shipLine2] = receipt.secondLine
@@ -432,6 +437,30 @@ class SyncService(
         connections.setCursor(connectionId, OffsetDateTime.now())
         // Money-side mirror rides every poll (labels, fees, ads — Stats fuel).
         runCatching { ingestLedger(connectionId) }
+        // Ship-by backfill: open orders ingested before expected_ship_date
+        // capture never re-arrive via min_last_modified — fetch them directly
+        // (bounded; self-extinguishing once every open order carries a date).
+        runCatching {
+            val needing = dbQuery {
+                OrdersTable.selectAll()
+                    .where { OrdersTable.shipBy.isNull() }
+                    .andWhere { OrdersTable.completedAt.isNull() }
+                    .andWhere { OrdersTable.connectionId eq connectionId }
+                    .andWhere { OrdersTable.platformStatus notInList listOf("canceled", "fully refunded") }
+                    .limit(20)
+                    .map { it[OrdersTable.id] to it[OrdersTable.platformOrderId] }
+            }
+            for ((oid, receiptId) in needing) {
+                val r = connections.fetchReceipt(connectionId, receiptId) ?: continue
+                r.transactions.mapNotNull { t -> t.expectedShipDate }.minOrNull()?.let { e ->
+                    dbQuery {
+                        OrdersTable.update({ OrdersTable.id eq oid }) {
+                            it[shipBy] = OffsetDateTime.ofInstant(Instant.ofEpochSecond(e), ZoneOffset.UTC)
+                        }
+                    }
+                }
+            }
+        }
         return SyncResult(receipts.results.size, created, matched, unmatched)
     }
 
@@ -444,6 +473,16 @@ class SyncService(
         deadStatuses: Set<String>,
     ) {
         val orderId = existing[OrdersTable.id]
+        // backfill ship-by for orders ingested before we read expected_ship_date
+        if (existing[OrdersTable.shipBy] == null) {
+            receipt.transactions.mapNotNull { t -> t.expectedShipDate }.minOrNull()?.let { e ->
+                dbQuery {
+                    OrdersTable.update({ OrdersTable.id eq orderId }) {
+                        it[shipBy] = OffsetDateTime.ofInstant(Instant.ofEpochSecond(e), ZoneOffset.UTC)
+                    }
+                }
+            }
+        }
         val prevStatus = existing[OrdersTable.platformStatus]
         val prevShipped = existing[OrdersTable.platformShipped]
         val newStatus = receipt.status.lowercase()
@@ -979,6 +1018,7 @@ class SyncService(
                 flagShort = o[OrdersTable.flagShort],
                 flagAdhoc = o[OrdersTable.flagAdhoc],
                 platformStatus = o[OrdersTable.platformStatus],
+                shipBy = o[OrdersTable.shipBy]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 archived = o[OrdersTable.archivedAt] != null,
                 lines = OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq oid }.map { l ->
                     OrderLineView(

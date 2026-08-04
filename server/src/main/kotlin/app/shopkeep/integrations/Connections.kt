@@ -85,6 +85,7 @@ data class EtsyTransaction(
     val quantity: Int = 1,
     val price: EtsyMoney = EtsyMoney(),
     val variations: List<EtsyVariation> = emptyList(),
+    @SerialName("expected_ship_date") val expectedShipDate: Long? = null, // epoch seconds
 )
 
 /* ---------- shop listings (import picker, D17) ---------- */

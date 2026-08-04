@@ -42,6 +42,7 @@ type Order = {
   flagShort: boolean;
   flagAdhoc: boolean;
   platformStatus: string;
+  shipBy: string | null;
   archived: boolean;
   lines: OrderLine[];
 };
@@ -113,6 +114,23 @@ const age = (iso: string | null) => {
   if (m < 60 * 24) return `${Math.floor(m / 60)}h`;
   return `${Math.floor(m / (60 * 24))}d`;
 };
+
+/** Days until ship-by (negative = overdue). */
+const daysUntil = (iso: string) => Math.floor((new Date(iso).getTime() - Date.now()) / 86_400_000);
+const shipByLabel = (iso: string) => {
+  const d = daysUntil(iso);
+  if (d < 0) return `ship by ${-d}d overdue`;
+  if (d === 0) return "ship today";
+  if (d === 1) return "ship tomorrow";
+  return `ship in ${d}d`;
+};
+const shipByTone = (iso: string) => {
+  const d = daysUntil(iso);
+  return d < 0 ? "bg-crit/10 text-crit" : d <= 1 ? "bg-warn/10 text-warn" : "bg-panel2 text-ink2";
+};
+// deadline-first: soonest ship-by leads; no-deadline cards fall back to oldest placed
+const byDeadline = (a: Order, b: Order) =>
+  (a.shipBy ?? "9999").localeCompare(b.shipBy ?? "9999") || (a.placedAt ?? "").localeCompare(b.placedAt ?? "");
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
@@ -247,7 +265,7 @@ export function OrdersPage() {
           style={{ gridTemplateColumns: `repeat(${Math.max(laneList.length, 1)}, minmax(215px, 1fr))` }}
         >
           {laneList.map((lane) => {
-            const cards = all.filter((o) => o.laneId === lane.id);
+            const cards = all.filter((o) => o.laneId === lane.id).sort(byDeadline);
             return (
               <div
                 key={lane.id}
@@ -312,7 +330,7 @@ export function OrdersPage() {
         <OrderDetailPanel
           orderId={openId}
           lanes={laneList}
-          boardOrder={laneList.flatMap((l) => all.filter((o) => o.laneId === l.id).map((o) => o.id))}
+          boardOrder={laneList.flatMap((l) => all.filter((o) => o.laneId === l.id).sort(byDeadline).map((o) => o.id))}
           onNavigate={setOpenId}
           onClose={() => setOpenId(null)}
           onMove={(orderId, laneId) => move.mutate({ orderId, laneId })}
@@ -416,6 +434,14 @@ function OrderDetailPanel(props: {
               </a>
             )}
             {o?.placedAt && <span>placed {age(o.placedAt)} ago</span>}
+            {o?.shipBy && (
+              <span
+                title="Etsy expected ship date"
+                className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider uppercase ${shipByTone(o.shipBy)}`}
+              >
+                {shipByLabel(o.shipBy)} · {new Date(o.shipBy).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+              </span>
+            )}
             <span className="flex items-center gap-1.5">
               <span className="text-[10px] font-extrabold tracking-widest text-mut">LANE</span>
               <select
@@ -908,10 +934,18 @@ function OrderCard(props: {
     >
       <div className="flex items-baseline gap-1.5">
         <span className="min-w-0 truncate text-[13px] font-[650]">{o.buyerName || "Unknown buyer"}</span>
-        <span
-          className={`ml-auto font-mono text-[10.5px] whitespace-nowrap ${old ? "font-bold text-warn" : "text-mut"}`}
-        >
-          {orderAge}
+        <span className="ml-auto flex items-center gap-1.5">
+          {o.shipBy && (
+            <span
+              title={`Etsy expected ship date: ${new Date(o.shipBy).toLocaleDateString()}`}
+              className={`rounded-full px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider whitespace-nowrap uppercase ${shipByTone(o.shipBy)}`}
+            >
+              {shipByLabel(o.shipBy)}
+            </span>
+          )}
+          <span className={`font-mono text-[10.5px] whitespace-nowrap ${old ? "font-bold text-warn" : "text-mut"}`}>
+            {orderAge}
+          </span>
         </span>
       </div>
 
