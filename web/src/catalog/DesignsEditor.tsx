@@ -163,10 +163,10 @@ export function DesignsTab({ productId, slots, materials }: { productId: number;
             + FOR ⟨axis value⟩ → different assignments
           </button>
           {/* net-new materials only this colorway includes (mirrors variant extras) */}
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <div className="mt-2 text-xs">
             <span className="text-[10px] font-extrabold tracking-widest text-mut uppercase">Extras</span>
             {(d.extras ?? []).map((e, ei) => (
-              <span key={ei} className="flex items-center gap-1">
+              <div key={ei} className="mt-1 flex items-center gap-1.5">
                 +
                 <MatSelect materials={materials} value={e.materialId}
                   onChange={(id) => upd(i, (x) => ({ ...x, extras: x.extras.map((y, k) => (k === ei ? { ...y, materialId: id } : y)) }))} />
@@ -175,11 +175,13 @@ export function DesignsTab({ productId, slots, materials }: { productId: number;
                   onChange={(ev) => upd(i, (x) => ({ ...x, extras: x.extras.map((y, k) => (k === ei ? { ...y, quantity: Number(ev.target.value) } : y)) }))}
                   className="w-14 rounded-md border border-line bg-panel2 px-1.5 py-0.5 text-right font-mono text-xs outline-none" />
                 <button onClick={() => upd(i, (x) => ({ ...x, extras: x.extras.filter((_, k) => k !== ei) }))} className="text-mut hover:text-crit"><Trash2 size={11} /></button>
-              </span>
+              </div>
             ))}
-            <button onClick={() => upd(i, (x) => ({ ...x, extras: [...(x.extras ?? []), { materialId: materials[0]?.id ?? 0, quantity: 1 }] }))}
-              className="rounded-md border border-dashed border-line px-2 py-0.5 text-[11px] text-accent hover:border-accent">+ extra material</button>
-            <span className="text-[10px] text-mut">added to the BOM only when an order resolves to this design</span>
+            <div className="mt-1.5 flex items-center gap-2">
+              <button onClick={() => upd(i, (x) => ({ ...x, extras: [...(x.extras ?? []), { materialId: materials[0]?.id ?? 0, quantity: 1 }] }))}
+                className="rounded-md border border-dashed border-line px-2 py-0.5 text-[11px] text-accent hover:border-accent">+ extra material</button>
+              <span className="text-[10px] text-mut">added to the BOM only when an order resolves to this design</span>
+            </div>
           </div>
         </div>
       ))}
