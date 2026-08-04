@@ -25,6 +25,7 @@ export type ProductInput = {
   description: string;
   skuPrefix: string;
   laborMinutes: number;
+  shipWeightGrams?: number | null; // override; else derived from BOM (D22 USPS quotes)
   imageDocumentId: number | null;
   slots: Slot[];
   rules: Rule[];

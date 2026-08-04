@@ -63,6 +63,7 @@ type OrderDetail = {
   order: Order;
   shipFeesMinor: number | null;
   shipEstimateMinor: number | null;
+  shipEstimateSource: "usps" | "profile" | null;
   shipName: string | null;
   shipLine1: string | null;
   shipLine2: string | null;
@@ -600,8 +601,13 @@ function OrderDetailPanel(props: {
                         <tr><td className="py-0.5 text-ink2" title="per-product labor × global labor rate">Labor</td><td className="py-0.5 text-right font-mono text-ink2">−{money(d.laborMinor ?? 0)}</td></tr>
                         {d.shipEstimateMinor != null && (
                           <tr>
-                            <td className="py-0.5 text-ink2" title="expected postage from the packaging profile — Etsy's API exposes actual label costs only shop-wide, never per order">
-                              Shipping label <span className="rounded bg-warn/10 px-1 text-[8.5px] font-extrabold tracking-wider text-warn">EST</span>
+                            <td className="py-0.5 text-ink2" title={d.shipEstimateSource === "usps"
+                              ? "live USPS commercial-rate quote from this order's weight, box, and destination ZIP"
+                              : "expected postage from the packaging profile — connect USPS for live quotes"}>
+                              Shipping label{" "}
+                              {d.shipEstimateSource === "usps"
+                                ? <span className="rounded bg-accent/10 px-1 text-[8.5px] font-extrabold tracking-wider text-accent">USPS EST</span>
+                                : <span className="rounded bg-warn/10 px-1 text-[8.5px] font-extrabold tracking-wider text-warn">EST</span>}
                             </td>
                             <td className="py-0.5 text-right font-mono text-ink2">−{money(d.shipEstimateMinor)}</td>
                           </tr>

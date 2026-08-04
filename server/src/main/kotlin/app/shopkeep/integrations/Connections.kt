@@ -21,8 +21,11 @@ import io.ktor.http.isSuccess
 import io.ktor.http.parameters
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.andWhere
+import org.jetbrains.exposed.sql.json.jsonb
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.javatime.timestampWithTimeZone
@@ -57,6 +60,7 @@ object ConnectionsTable : Table("storefront_connections") {
     val lastVerifiedAt = timestampWithTimeZone("last_verified_at").nullable()
     val errorMessage = text("error_message").nullable()
     val syncCursor = timestampWithTimeZone("sync_cursor").nullable()
+    val config = jsonb<Map<String, String>>("config", Json.Default).nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -199,6 +203,15 @@ data class EtsyReceipt(
 data class EtsyReceipts(val count: Int = 0, val results: List<EtsyReceipt> = emptyList())
 
 @Serializable
+data class UspsToken(
+    @SerialName("access_token") val accessToken: String = "",
+    @SerialName("expires_in") val expiresIn: Long = 3600,
+)
+
+@Serializable
+data class UspsRateResponse(@SerialName("totalBasePrice") val totalBasePrice: Double = 0.0)
+
+@Serializable
 data class EtsyLedgerEntry(
     @SerialName("entry_id") val entryId: Long = 0,
     val amount: Long = 0, // minor units, negative = charge
@@ -283,6 +296,7 @@ data class Connection(
     val lastSyncedAt: String?,
     val orderCount: Long,
     val capabilities: PlatformCapabilities,
+    val config: Map<String, String>? = null,
 )
 
 @Serializable
@@ -436,6 +450,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
     suspend fun verify(id: Long): Connection? {
         val row = dbQuery { ConnectionsTable.selectAll().where { ConnectionsTable.id eq id }.singleOrNull() }
             ?: return null
+        if (row[ConnectionsTable.platform] == "usps") return verifyUsps(id, row)
         val keystring = row[ConnectionsTable.apiKeystring]
         val sharedSecret = row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: ""
         return try {
@@ -728,8 +743,10 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         }.getOrNull()
     }
 
-    suspend fun connectedIds(): List<Long> = dbQuery {
-        ConnectionsTable.selectAll().where { ConnectionsTable.status eq "connected" }.map { it[ConnectionsTable.id] }
+    suspend fun connectedIds(platform: String = "etsy"): List<Long> = dbQuery {
+        ConnectionsTable.selectAll().where { ConnectionsTable.status eq "connected" }
+            .andWhere { ConnectionsTable.platform eq platform }
+            .map { it[ConnectionsTable.id] }
     }
 
     suspend fun cursor(connectionId: Long): OffsetDateTime? = dbQuery {
@@ -739,6 +756,114 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
 
     suspend fun setCursor(connectionId: Long, at: OffsetDateTime): Unit = dbQuery {
         ConnectionsTable.update({ ConnectionsTable.id eq connectionId }) { it[syncCursor] = at }
+    }
+
+    /* ---------- USPS connection (D22: rate quotes, not labels) ---------- */
+
+    /** Create + immediately verify a USPS Prices API connection. */
+    suspend fun createUsps(label: String, consumerKey: String, consumerSecret: String, originZip: String, mailClass: String): Connection? {
+        val id = dbQuery {
+            ConnectionsTable.insert {
+                it[platform] = "usps"
+                it[ConnectionsTable.label] = label.ifBlank { "USPS" }
+                it[apiKeystring] = consumerKey
+                it[apiSharedSecretEnc] = crypto.encrypt(consumerSecret)
+                it[scopes] = "prices"
+                it[status] = "pending"
+                it[config] = mapOf("originZip" to originZip, "mailClass" to mailClass)
+            } get ConnectionsTable.id
+        }
+        return verify(id)
+    }
+
+    suspend fun updateUspsConfig(id: Long, originZip: String, mailClass: String): Boolean = dbQuery {
+        ConnectionsTable.update({ ConnectionsTable.id eq id }) {
+            it[config] = mapOf("originZip" to originZip, "mailClass" to mailClass)
+        } > 0
+    }
+
+    /** Verify = OAuth2 client-credentials token fetch against apis.usps.com. */
+    private suspend fun verifyUsps(id: Long, row: org.jetbrains.exposed.sql.ResultRow): Connection {
+        return try {
+            val token = uspsToken(row[ConnectionsTable.apiKeystring], row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: "")
+            dbQuery {
+                ConnectionsTable.update({ ConnectionsTable.id eq id }) {
+                    it[accessTokenEnc] = crypto.encrypt(token.accessToken)
+                    it[tokenExpiresAt] = OffsetDateTime.now().plusSeconds(token.expiresIn)
+                    it[status] = "connected"
+                    it[lastVerifiedAt] = OffsetDateTime.now()
+                    it[errorMessage] = null
+                }
+                ConnectionsTable.selectAll().where { ConnectionsTable.id eq id }.single().toConnection()
+            }
+        } catch (e: Exception) {
+            dbQuery {
+                ConnectionsTable.update({ ConnectionsTable.id eq id }) {
+                    it[status] = "error"
+                    it[errorMessage] = e.message?.take(300) ?: "USPS verification failed"
+                }
+                ConnectionsTable.selectAll().where { ConnectionsTable.id eq id }.single().toConnection()
+            }
+        }
+    }
+
+    private suspend fun uspsToken(key: String, secret: String): UspsToken {
+        val resp = http.request("https://apis.usps.com/oauth2/v3/token") {
+            method = io.ktor.http.HttpMethod.Post
+            contentType(io.ktor.http.ContentType.Application.Json)
+            setBody("""{"grant_type":"client_credentials","client_id":"$key","client_secret":"$secret"}""")
+        }
+        if (!resp.status.isSuccess()) error("USPS token ${resp.status.value}: ${resp.bodyAsText().take(300)}")
+        return resp.body()
+    }
+
+    /** Valid bearer for the USPS connection, refreshing via client credentials. */
+    private suspend fun uspsAccess(row: org.jetbrains.exposed.sql.ResultRow): String {
+        val expiresAt = row[ConnectionsTable.tokenExpiresAt]
+        val stored = row[ConnectionsTable.accessTokenEnc]?.let(crypto::decrypt)
+        if (stored != null && expiresAt != null && expiresAt.isAfter(OffsetDateTime.now().plusMinutes(2))) return stored
+        val token = uspsToken(row[ConnectionsTable.apiKeystring], row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: "")
+        dbQuery {
+            ConnectionsTable.update({ ConnectionsTable.id eq row[ConnectionsTable.id] }) {
+                it[accessTokenEnc] = crypto.encrypt(token.accessToken)
+                it[tokenExpiresAt] = OffsetDateTime.now().plusSeconds(token.expiresIn)
+            }
+        }
+        return token.accessToken
+    }
+
+    /** Commercial-rate quote in minor units, or null (missing conn/data/error).
+     *  Cached per (dest ZIP3, class, dims, oz bracket) — rates change rarely. */
+    private val uspsQuoteCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    suspend fun uspsQuote(destZip: String, weightGrams: Double, lengthIn: Double, widthIn: Double, heightIn: Double): Long? {
+        val row = dbQuery {
+            ConnectionsTable.selectAll().where { ConnectionsTable.platform eq "usps" }
+                .andWhere { ConnectionsTable.status eq "connected" }.firstOrNull()
+        } ?: return null
+        val cfg = row[ConnectionsTable.config] ?: return null
+        val originZip = cfg["originZip"]?.takeIf { it.isNotBlank() } ?: return null
+        val mailClass = cfg["mailClass"]?.takeIf { it.isNotBlank() } ?: "USPS_GROUND_ADVANTAGE"
+        val zip5 = Regex("""\d{5}""").find(destZip)?.value ?: return null
+        val ounces = Math.ceil(weightGrams / 28.3495)
+        val pounds = ounces / 16.0
+        val cacheKey = "${zip5.take(3)}|$mailClass|${lengthIn}x${widthIn}x${heightIn}|$ounces"
+        uspsQuoteCache[cacheKey]?.let { return it }
+        return runCatching {
+            val access = uspsAccess(row)
+            val body = """{"originZIPCode":"$originZip","destinationZIPCode":"$zip5","weight":$pounds,"length":$lengthIn,"width":$widthIn,"height":$heightIn,"mailClass":"$mailClass","processingCategory":"MACHINABLE","rateIndicator":"SP","destinationEntryFacilityType":"NONE","priceType":"COMMERCIAL"}"""
+            val resp = http.request("https://apis.usps.com/prices/v3/base-rates/search") {
+                method = io.ktor.http.HttpMethod.Post
+                headers { append(HttpHeaders.Authorization, "Bearer $access") }
+                contentType(io.ktor.http.ContentType.Application.Json)
+                setBody(body)
+            }
+            if (!resp.status.isSuccess()) error("USPS ${resp.status.value}: ${resp.bodyAsText().take(200)}")
+            val quote: UspsRateResponse = resp.body()
+            val minor = Math.round(quote.totalBasePrice * 100)
+            uspsQuoteCache[cacheKey] = minor
+            minor
+        }.getOrNull()
     }
 
     private fun org.jetbrains.exposed.sql.ResultRow.toConnection(): Connection = Connection(
@@ -754,5 +879,6 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         lastSyncedAt = this[ConnectionsTable.syncCursor]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
         orderCount = OrdersTable.selectAll().where { OrdersTable.connectionId eq this@toConnection[ConnectionsTable.id] }.count(),
         capabilities = ETSY_CAPABILITIES,
+        config = this[ConnectionsTable.config],
     )
 }

@@ -173,13 +173,18 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
               imageDocumentId={p.imageDocumentId}
               onChange={(id) => set({ imageDocumentId: id })}
             />
-            <div className="grid flex-1 gap-4 sm:grid-cols-[1fr_130px_110px]">
+            <div className="grid flex-1 gap-4 sm:grid-cols-[1fr_130px_110px_130px]">
               <Field label="Product name" value={p.name} onChange={(v) => set({ name: v })} autoFocus={!existing} />
               <Field label="SKU prefix" value={p.skuPrefix} onChange={(v) => set({ skuPrefix: v.toUpperCase() })} />
               <Field
                 label="Labor (min)"
                 value={String(p.laborMinutes || "")}
                 onChange={(v) => set({ laborMinutes: parseInt(v) || 0 })}
+              />
+              <Field
+                label="Ship wt (g, opt.)"
+                value={p.shipWeightGrams != null ? String(p.shipWeightGrams) : ""}
+                onChange={(v) => set({ shipWeightGrams: v ? parseInt(v) || 0 : null })}
               />
             </div>
           </div>

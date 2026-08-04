@@ -13,6 +13,7 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -23,6 +24,18 @@ data class AddNoteRequest(val body: String = "", val documentIds: List<Long> = e
 
 @kotlinx.serialization.Serializable
 data class MatchLineRequest(val listingId: Long, val remember: Boolean = true)
+
+@kotlinx.serialization.Serializable
+data class UspsConnectRequest(
+    val label: String = "USPS",
+    val consumerKey: String,
+    val consumerSecret: String,
+    val originZip: String,
+    val mailClass: String = "USPS_GROUND_ADVANTAGE",
+)
+
+@kotlinx.serialization.Serializable
+data class UspsConfigRequest(val originZip: String, val mailClass: String = "USPS_GROUND_ADVANTAGE")
 
 @Serializable
 data class StartEtsyResponse(val authUrl: String, val redirectUri: String)
@@ -95,6 +108,26 @@ fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService
     }
 
     requireAdmin {
+        // USPS rate-quote connection (D22): credentials + origin config in-app.
+        post("/integrations/usps/connect") {
+            val req = call.receive<UspsConnectRequest>()
+            if (req.consumerKey.isBlank() || req.consumerSecret.isBlank() || req.originZip.isBlank()) {
+                call.respond(HttpStatusCode.UnprocessableEntity, ApiError("Consumer key, secret, and origin ZIP are required."))
+                return@post
+            }
+            val c = connections.createUsps(req.label, req.consumerKey, req.consumerSecret, req.originZip.trim(), req.mailClass)
+            if (c == null) call.respond(HttpStatusCode.UnprocessableEntity, ApiError("Couldn't create the USPS connection."))
+            else call.respond(c)
+        }
+
+        put("/integrations/usps/{id}/config") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            val req = call.receive<UspsConfigRequest>()
+            if (id == null || !connections.updateUspsConfig(id, req.originZip.trim(), req.mailClass)) {
+                call.respond(HttpStatusCode.NotFound, ApiError("Connection not found."))
+            } else call.respond(mapOf("ok" to true))
+        }
+
         post("/integrations/etsy/start") {
             val req = call.receive<StartEtsyRequest>()
             if (req.keystring.isBlank() || req.sharedSecret.isBlank()) {

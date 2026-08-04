@@ -18,6 +18,7 @@ type Connection = {
   capabilities: Capabilities;
   lastSyncedAt: string | null;
   orderCount: number;
+  config: Record<string, string> | null;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -126,28 +127,122 @@ export function ConnectionsPage() {
           </div>
           <div className="mt-2 grid gap-1 text-xs text-ink2">
             {c.shopId && <span>shop id <b className="font-mono">{c.shopId}</b></span>}
-            <span>scopes <b className="font-mono">{c.scopes || "—"}</b></span>
-            {c.status === "connected" && (
+            {c.platform !== "usps" && <span>scopes <b className="font-mono">{c.scopes || "—"}</b></span>}
+            {c.platform !== "usps" && c.status === "connected" && (
               <span>
                 {c.lastSyncedAt
                   ? <>last synced <b>{new Date(c.lastSyncedAt).toLocaleString()}</b> · <b className="font-mono">{c.orderCount}</b> orders ingested</>
                   : "not synced yet — first sync pulls open orders only"}
               </span>
             )}
+            {c.platform === "usps" && <UspsConfig c={c} />}
             {c.lastVerifiedAt && <span className="text-mut">verified {new Date(c.lastVerifiedAt).toLocaleString()}</span>}
             {c.errorMessage && <span className="font-semibold text-crit">{c.errorMessage}</span>}
-            <span className="text-mut">
-              capabilities: {c.capabilities.maxPhotos} photos · {c.capabilities.maxVariationAxes} axes
-              {c.capabilities.skuOnAllAxes ? " · per-combination SKUs" : ""}
-            </span>
+            {c.platform !== "usps" && (
+              <span className="text-mut">
+                capabilities: {c.capabilities.maxPhotos} photos · {c.capabilities.maxVariationAxes} axes
+                {c.capabilities.skuOnAllAxes ? " · per-combination SKUs" : ""}
+              </span>
+            )}
           </div>
         </Card>
       ))}
 
-      {isAdmin ? <ConnectEtsy /> : (
+      {isAdmin ? (
+        <>
+          <ConnectEtsy />
+          {!(connections.data ?? []).some((c) => c.platform === "usps" && c.status !== "disconnected") && <ConnectUsps />}
+        </>
+      ) : (
         <p className="text-sm text-mut">Storefront connections are managed by admins.</p>
       )}
     </div>
+  );
+}
+
+const MAIL_CLASSES = [
+  ["USPS_GROUND_ADVANTAGE", "Ground Advantage"],
+  ["PRIORITY_MAIL", "Priority Mail"],
+  ["FIRST-CLASS_PACKAGE_SERVICE", "First-Class Package"],
+] as const;
+
+/** Origin ZIP + mail class live on the connection (D22). */
+function UspsConfig({ c }: { c: Connection }) {
+  const queryClient = useQueryClient();
+  const [zip, setZip] = useState(c.config?.originZip ?? "");
+  const [mailClass, setMailClass] = useState(c.config?.mailClass ?? "USPS_GROUND_ADVANTAGE");
+  const dirty = zip !== (c.config?.originZip ?? "") || mailClass !== (c.config?.mailClass ?? "USPS_GROUND_ADVANTAGE");
+  const save = useMutation({
+    mutationFn: () => req(`/usps/${c.id}/config`, { method: "PUT", body: JSON.stringify({ originZip: zip, mailClass }) }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
+  });
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      origin ZIP
+      <input value={zip} onChange={(e) => setZip(e.target.value)} className="w-20 rounded border border-line bg-panel2 px-2 py-0.5 font-mono text-xs" />
+      <select value={mailClass} onChange={(e) => setMailClass(e.target.value)} className="rounded border border-line bg-panel2 px-1.5 py-0.5 text-xs">
+        {MAIL_CLASSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+      {dirty && (
+        <button type="button" onClick={() => save.mutate()} disabled={save.isPending}
+          className="rounded border border-accent/40 px-2 py-0.5 text-[11px] font-semibold text-accent hover:bg-accent/5 disabled:opacity-50">
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+      )}
+      <span className="text-mut">quotes use commercial pricing — what Etsy labels charge</span>
+    </span>
+  );
+}
+
+function ConnectUsps() {
+  const queryClient = useQueryClient();
+  const [key, setKey] = useState("");
+  const [secret, setSecret] = useState("");
+  const [zip, setZip] = useState("");
+  const [mailClass, setMailClass] = useState("USPS_GROUND_ADVANTAGE");
+  const connect = useMutation({
+    mutationFn: () =>
+      req<Connection>("/usps/connect", {
+        method: "POST",
+        body: JSON.stringify({ consumerKey: key, consumerSecret: secret, originZip: zip, mailClass }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
+  });
+  return (
+    <Card className="mt-3">
+      <h2 className="text-sm font-semibold">Connect USPS <span className="ml-1 text-xs font-normal text-mut">shipping cost estimates (D22)</span></h2>
+      <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs text-ink2">
+        <li>Sign up (free) at <b>developer.usps.com</b> and create an app — this issues a <b>consumer key</b> and <b>consumer secret</b>.</li>
+        <li>Add the <b>Prices</b> API to the app (default access is fine — quotes only, no labels).</li>
+        <li>Paste the credentials below with the ZIP you ship from. Connect verifies by fetching a token.</li>
+      </ol>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Field label="Consumer key" value={key} onChange={setKey} />
+        <Field label="Consumer secret" value={secret} onChange={setSecret} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <div className="w-32"><Field label="Origin ZIP" value={zip} onChange={setZip} /></div>
+        <label className="block text-xs">
+          <span className="mb-1 block font-semibold tracking-widest uppercase text-mut">Mail class</span>
+          <select value={mailClass} onChange={(e) => setMailClass(e.target.value)} className="rounded-md border border-line bg-panel2 px-2 py-2 text-sm">
+            {MAIL_CLASSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </label>
+      </div>
+      <ErrorText>{connect.error?.message}</ErrorText>
+      <button
+        type="button"
+        disabled={!key.trim() || !secret.trim() || !zip.trim() || connect.isPending}
+        onClick={() => connect.mutate()}
+        className="mt-3 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+      >
+        {connect.isPending ? "Connecting…" : "Connect USPS"}
+      </button>
+      <p className="mt-2 text-[11px] text-mut">
+        Credentials are encrypted at rest like storefront tokens. Order estimates need box dimensions on your packaging
+        materials and weights (derived from each product's BOM, or set per product).
+      </p>
+    </Card>
   );
 }
 

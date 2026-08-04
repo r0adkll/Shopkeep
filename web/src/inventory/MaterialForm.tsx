@@ -172,6 +172,8 @@ export function MaterialForm({
   const allCategories = [...new Set([...KNOWN_CATEGORIES, ...categories])];
 
   const set = (patch: Partial<MaterialInput>) => setM((prev) => ({ ...prev, ...patch }));
+  const setAttr = (k: string, v: string) =>
+    set({ attributes: v ? { ...m.attributes, [k]: v } : Object.fromEntries(Object.entries(m.attributes).filter(([x]) => x !== k)) });
 
   const pickCategory = (cat: string) => {
     const p = PROFILES[cat];
@@ -381,6 +383,46 @@ export function MaterialForm({
               <ColorField value={color} onChange={setColor} presets={BAMBU_PLA_BASIC} />
               {isFilament && !color && <span className="mt-1 block text-[11px] text-warn">Spool gauges use this color on the wall.</span>}
             </label>
+
+            {/* D22: USPS quotes need box dims + weights. Attributes-backed. */}
+            {m.category === "packaging" && (
+              <div>
+                <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">Box size <span className="font-normal normal-case">for USPS shipping quotes</span></span>
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink2">
+                  {(["lengthIn", "widthIn", "heightIn"] as const).map((k, i) => (
+                    <span key={k} className="flex items-center gap-1.5">
+                      {i > 0 && "×"}
+                      <input
+                        value={m.attributes[k] ?? ""}
+                        onChange={(e) => setAttr(k, e.target.value)}
+                        placeholder={["L", "W", "H"][i]}
+                        className="w-14 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
+                      />
+                    </span>
+                  ))}
+                  in · empty weight
+                  <input
+                    value={m.attributes.weightGrams ?? ""}
+                    onChange={(e) => setAttr("weightGrams", e.target.value)}
+                    placeholder="60"
+                    className="w-14 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
+                  />
+                  g
+                </div>
+              </div>
+            )}
+            {m.category !== "" && m.category !== "packaging" && !isFilament && (
+              <label className="flex items-center gap-2 text-xs text-ink2">
+                <span className="font-semibold tracking-widest uppercase text-mut">Weight per {m.unit || "piece"}</span>
+                <input
+                  value={m.attributes.weightGrams ?? ""}
+                  onChange={(e) => setAttr("weightGrams", e.target.value)}
+                  placeholder="—"
+                  className="w-16 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
+                />
+                g <span className="text-mut">(optional — lets USPS estimates weigh hardware)</span>
+              </label>
+            )}
 
             <div>
               <Field label="Unit" value={m.unit} onChange={(v) => set({ unit: v })} />

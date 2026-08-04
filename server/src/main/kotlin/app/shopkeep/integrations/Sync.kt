@@ -210,7 +210,8 @@ data class OrderNoteView(
 data class OrderDetail(
     val order: OrderView,
     val shipFeesMinor: Long? = null, // exact: receipt-linked shipping_transaction ledger entries
-    val shipEstimateMinor: Long? = null, // estimate: packaging profile's expected postage
+    val shipEstimateMinor: Long? = null, // estimate: USPS quote or packaging profile's expected postage
+    val shipEstimateSource: String? = null, // usps | profile
     val shipName: String?,
     val shipLine1: String?,
     val shipLine2: String?,
@@ -1039,21 +1040,27 @@ class SyncService(
                 .andWhere { PlatformLedgerTable.referenceId eq o[OrdersTable.platformOrderId] }
                 .sumOf { it[PlatformLedgerTable.amountMinor] } // ledger charges are negative; costs read positive
         }.takeIf { it != 0L }
-        val shipEstimate = summary.lines
+        // Three tiers (D22): USPS commercial quote (domestic, dims + weight
+        // known) -> packaging profile static estimate -> none.
+        val profileIds = summary.lines
             .mapNotNull { it.matchedListingId }.distinct()
             .mapNotNull { lid -> listings.get(lid)?.input?.packagingProfileId }.distinct()
-            .mapNotNull { pid ->
-                dbQuery {
-                    app.shopkeep.listings.PackagingProfilesTable.selectAll()
-                        .where { app.shopkeep.listings.PackagingProfilesTable.id eq pid }.singleOrNull()
-                        ?.get(app.shopkeep.listings.PackagingProfilesTable.shipCostEstimateMinor)
-                }
-            }.maxOrNull()
+        val staticEstimate = profileIds.mapNotNull { pid ->
+            dbQuery {
+                app.shopkeep.listings.PackagingProfilesTable.selectAll()
+                    .where { app.shopkeep.listings.PackagingProfilesTable.id eq pid }.singleOrNull()
+                    ?.get(app.shopkeep.listings.PackagingProfilesTable.shipCostEstimateMinor)
+            }
+        }.maxOrNull()
+        val uspsEstimate = uspsEstimateFor(o, profileIds)
+        val shipEstimate = uspsEstimate ?: staticEstimate
+        val shipEstimateSource = if (uspsEstimate != null) "usps" else if (staticEstimate != null) "profile" else null
 
         return OrderDetail(
             order = summary,
             shipFeesMinor = shipFees,
             shipEstimateMinor = shipEstimate,
+            shipEstimateSource = shipEstimateSource,
             shipName = o[OrdersTable.shipName],
             shipLine1 = o[OrdersTable.shipLine1],
             shipLine2 = o[OrdersTable.shipLine2],
@@ -1079,6 +1086,60 @@ class SyncService(
             events = events,
             notes = notes,
         )
+    }
+
+    /** USPS commercial quote for this order (D22): weight from product
+     *  override or the line's reserved BOM (+ per-piece weightGrams attrs),
+     *  box dims from the packaging band's box material. Null on any gap —
+     *  the caller falls back to the static profile estimate. */
+    private suspend fun uspsEstimateFor(o: org.jetbrains.exposed.sql.ResultRow, profileIds: List<Long>): Long? {
+        val country = o[OrdersTable.shipCountry] ?: return null
+        if (country.uppercase() !in setOf("US", "USA", "UNITED STATES")) return null
+        val zip = o[OrdersTable.shipZip] ?: return null
+        val rawLines = dbQuery {
+            OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq o[OrdersTable.id] }.toList()
+        }
+        var weight = 0.0
+        var units = 0
+        for (l in rawLines) {
+            units += l[OrderLinesTable.quantity]
+            val listingId = l[OrderLinesTable.matchedListingId]
+                ?: l[OrderLinesTable.listingConfigurationId]?.let { c ->
+                    dbQuery {
+                        ListingConfigurationsTable.selectAll().where { ListingConfigurationsTable.id eq c }
+                            .singleOrNull()?.get(ListingConfigurationsTable.listingId)
+                    }
+                } ?: return null // unmatched line -> weight unknowable
+            val productId = listings.get(listingId)?.input?.productId ?: return null
+            val perUnit = products.get(productId)?.shipWeightGrams?.toDouble() ?: run {
+                val bom = l[OrderLinesTable.reservedBom] ?: return null
+                var g = 0.0
+                for (b in bom) {
+                    val m = materials.get(b.materialId) ?: continue
+                    g += when (m.unit) {
+                        "g" -> b.qty
+                        else -> (m.attributes["weightGrams"]?.toDoubleOrNull() ?: return null) * b.qty
+                    }
+                }
+                g
+            }
+            weight += perUnit * l[OrderLinesTable.quantity]
+        }
+        if (weight <= 0) return null
+        val profileId = profileIds.firstOrNull() ?: return null
+        val band = listings.resolvePackaging(profileId, units).band ?: return null
+        var dims: Triple<Double, Double, Double>? = null
+        var boxWeight = 0.0
+        for (bm in band.materials) {
+            val m = materials.get(bm.materialId) ?: continue
+            val len = m.attributes["lengthIn"]?.toDoubleOrNull()
+            val wid = m.attributes["widthIn"]?.toDoubleOrNull()
+            val hei = m.attributes["heightIn"]?.toDoubleOrNull()
+            if (len != null && wid != null && hei != null && dims == null) dims = Triple(len, wid, hei)
+            boxWeight += (m.attributes["weightGrams"]?.toDoubleOrNull() ?: 0.0) * bm.quantity
+        }
+        val (lgt, wdt, hgt) = dims ?: return null
+        return connections.uspsQuote(zip, weight + boxWeight, lgt, wdt, hgt)
     }
 
     suspend fun addNote(orderId: Long, userId: Long?, body: String, documentIds: List<Long>): Boolean {
