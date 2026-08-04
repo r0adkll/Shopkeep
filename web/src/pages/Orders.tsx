@@ -219,24 +219,8 @@ export function OrdersPage() {
       <header className="mb-5 flex flex-wrap items-center gap-5 border-b border-line py-5">
         <Wordmark />
         <NavTabs active="Orders" />
-        <label className="ml-auto flex items-center gap-1.5 text-xs text-mut">
-          sort
-          <select
-            value={boardSort}
-            onChange={(e) => {
-              const v = e.target.value as BoardSort;
-              setBoardSort(v);
-              localStorage.setItem("orders.sort", v);
-            }}
-            className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs text-ink outline-none focus:border-accent"
-          >
-            <option value="ship_by">Ship by date</option>
-            <option value="newest">Newest</option>
-            <option value="oldest">Oldest</option>
-          </select>
-        </label>
         <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}
-          className={`rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
+          className={`ml-auto rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
           archived
         </button>
         {isAdmin && (
@@ -281,6 +265,25 @@ export function OrdersPage() {
       </div>
 
       {editing && isAdmin && <LaneEditor lanes={laneList} onSaved={() => qc.invalidateQueries({ queryKey: ["lanes"] })} />}
+
+      <div className="mb-2 flex justify-end">
+        <label className="flex items-center gap-1.5 text-xs text-mut">
+          sort
+          <select
+            value={boardSort}
+            onChange={(e) => {
+              const v = e.target.value as BoardSort;
+              setBoardSort(v);
+              localStorage.setItem("orders.sort", v);
+            }}
+            className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs text-ink outline-none focus:border-accent"
+          >
+            <option value="ship_by">Ship by date</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+          </select>
+        </label>
+      </div>
 
       {lanes.isLoading || orders.isLoading ? (
         <p className="py-10 text-center text-sm text-mut">Loading queue…</p>
