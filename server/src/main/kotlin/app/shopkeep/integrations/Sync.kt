@@ -684,7 +684,8 @@ class SyncService(
         }
         // Skip dead/completed orders: nothing to reserve anymore.
         val dead = order[OrdersTable.platformStatus] in setOf("canceled", "fully refunded")
-        val short = if (!dead && order[OrdersTable.completedAt] == null) {
+        val reserved = !dead && order[OrdersTable.completedAt] == null
+        val short = if (reserved) {
             reserveResolved(r, l[OrderLinesTable.quantity], "Order #${order[OrdersTable.platformOrderId]}")
         } else false
         dbQuery {
@@ -704,7 +705,7 @@ class SyncService(
             OrderEventsTable.insert {
                 it[OrderEventsTable.orderId] = order[OrdersTable.id]
                 it[fromCategory] = null
-                it[toCategory] = if (stillUnmatched) "line $how" else "$how — materials reserved"
+                it[toCategory] = if (stillUnmatched) "line $how" else if (reserved) "$how — materials reserved" else how
             }
         }
     }
