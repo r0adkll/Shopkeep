@@ -745,7 +745,15 @@ export function ListingEditor({
             {existing?.etsyListingId ? (
               <>
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider ${
-                  dirty || (pushPreview.data?.changes.length ?? 0) > 0 ? "bg-warn/10 text-warn" : existing.syncState === "in_sync" ? "bg-good/10 text-good" : "bg-line/60 text-mut"
+                  dirty || (pushPreview.data?.changes.length ?? 0) > 0
+                    ? "bg-warn/10 text-warn"
+                    : pushPreview.isLoading
+                      ? "bg-line/60 text-mut"
+                      : pushPreview.data
+                        ? "bg-good/10 text-good"
+                        : existing.syncState === "in_sync"
+                          ? "bg-good/10 text-good"
+                          : "bg-line/60 text-mut"
                 }`}>
                   {dirty ? "UNSAVED EDITS" : pushPreview.isLoading ? "CHECKING…" : (pushPreview.data?.changes.length ?? 0) > 0 ? `${pushPreview.data!.changes.length} TO PUSH` : "IN SYNC"}
                 </span>
