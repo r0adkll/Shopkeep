@@ -612,6 +612,8 @@ class SyncService(
             for (a in (set?.assignments ?: d.assignments)) {
                 addSelection(a.slotPosition, a.materialId, a.qtyOverride ?: slotQty(a.slotPosition))
             }
+            // net-new materials the colorway includes beyond its slot fills (D20 ext.)
+            for (e in d.extras) addBom(e.materialId, e.quantity)
         }
         // resolutions can also live on non-slot axes (e.g. a style axis mapped to variants)
         for (res in resolutions) {

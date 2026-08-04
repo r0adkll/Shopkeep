@@ -9,7 +9,7 @@ import type { Slot } from "./api";
 
 export type DesignAssignment = { slotPosition: number; materialId: number; qtyOverride: number | null };
 export type DesignOverrideSet = { key: string; assignments: DesignAssignment[] };
-export type ProductDesign = { id: number | null; name: string; assignments: DesignAssignment[]; overrideSets: DesignOverrideSet[] };
+export type ProductDesign = { id: number | null; name: string; assignments: DesignAssignment[]; overrideSets: DesignOverrideSet[]; extras: { materialId: number; quantity: number }[] };
 export type SlotDelta = { slotPosition: number; deltaQty: number | null; removed: boolean };
 export type VariantAdjustments = { slotDeltas: SlotDelta[]; extras: { materialId: number; quantity: number }[]; laborDeltaMinutes: number };
 export type ProductVariant = { id: number | null; name: string; adjustments: VariantAdjustments };
@@ -162,9 +162,28 @@ export function DesignsTab({ productId, slots, materials }: { productId: number;
             className="mt-2 w-full rounded-lg border border-dashed border-line py-1 text-[11px] text-accent hover:border-accent">
             + FOR ⟨axis value⟩ → different assignments
           </button>
+          {/* net-new materials only this colorway includes (mirrors variant extras) */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-[10px] font-extrabold tracking-widest text-mut uppercase">Extras</span>
+            {(d.extras ?? []).map((e, ei) => (
+              <span key={ei} className="flex items-center gap-1">
+                +
+                <MatSelect materials={materials} value={e.materialId}
+                  onChange={(id) => upd(i, (x) => ({ ...x, extras: x.extras.map((y, k) => (k === ei ? { ...y, materialId: id } : y)) }))} />
+                ×
+                <input type="number" step="any" value={e.quantity}
+                  onChange={(ev) => upd(i, (x) => ({ ...x, extras: x.extras.map((y, k) => (k === ei ? { ...y, quantity: Number(ev.target.value) } : y)) }))}
+                  className="w-14 rounded-md border border-line bg-panel2 px-1.5 py-0.5 text-right font-mono text-xs outline-none" />
+                <button onClick={() => upd(i, (x) => ({ ...x, extras: x.extras.filter((_, k) => k !== ei) }))} className="text-mut hover:text-crit"><Trash2 size={11} /></button>
+              </span>
+            ))}
+            <button onClick={() => upd(i, (x) => ({ ...x, extras: [...(x.extras ?? []), { materialId: materials[0]?.id ?? 0, quantity: 1 }] }))}
+              className="rounded-md border border-dashed border-line px-2 py-0.5 text-[11px] text-accent hover:border-accent">+ extra material</button>
+            <span className="text-[10px] text-mut">added to the BOM only when an order resolves to this design</span>
+          </div>
         </div>
       ))}
-      <button onClick={() => setList([...list, { id: null, name: "", assignments: [], overrideSets: [] }])}
+      <button onClick={() => setList([...list, { id: null, name: "", assignments: [], overrideSets: [], extras: [] }])}
         className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line py-2 text-sm text-accent hover:border-accent"><Plus size={14} /> design</button>
       <div className="mt-3 flex items-center gap-3">
         <button onClick={() => jput<ProductDesign[]>(`/api/v1/catalog/products/${productId}/designs`, list).then((r) => { setListRaw(r); setMsg("Saved."); }).catch((e) => setMsg(String(e)))}

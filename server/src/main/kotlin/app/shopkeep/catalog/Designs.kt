@@ -32,6 +32,7 @@ object ProductDesignsTable : Table("product_designs") {
     val position = integer("position")
     val assignments = jsonb<List<DesignAssignment>>("assignments", Json.Default)
     val overrideSets = jsonb<List<DesignOverrideSet>>("override_sets", Json.Default)
+    val extras = jsonb<List<ExtraMaterial>>("extras", Json.Default)
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -56,6 +57,8 @@ data class ProductDesign(
     val name: String,
     val assignments: List<DesignAssignment> = emptyList(),
     val overrideSets: List<DesignOverrideSet> = emptyList(),
+    /** Net-new materials this colorway includes beyond its slot fills. */
+    val extras: List<ExtraMaterial> = emptyList(),
 )
 
 @Serializable
@@ -87,6 +90,7 @@ class DesignRepository {
                 ProductDesign(
                     it[ProductDesignsTable.id], it[ProductDesignsTable.name],
                     it[ProductDesignsTable.assignments], it[ProductDesignsTable.overrideSets],
+                    it[ProductDesignsTable.extras],
                 )
             }
     }
@@ -100,7 +104,7 @@ class DesignRepository {
 
     suspend fun design(id: Long): ProductDesign? = dbQuery {
         ProductDesignsTable.selectAll().where { ProductDesignsTable.id eq id }.singleOrNull()?.let {
-            ProductDesign(it[ProductDesignsTable.id], it[ProductDesignsTable.name], it[ProductDesignsTable.assignments], it[ProductDesignsTable.overrideSets])
+            ProductDesign(it[ProductDesignsTable.id], it[ProductDesignsTable.name], it[ProductDesignsTable.assignments], it[ProductDesignsTable.overrideSets], it[ProductDesignsTable.extras])
         }
     }
 
@@ -122,12 +126,14 @@ class DesignRepository {
                     ProductDesignsTable.update({ ProductDesignsTable.id eq d.id }) {
                         it[name] = d.name.trim(); it[position] = pos
                         it[assignments] = d.assignments; it[overrideSets] = d.overrideSets
+                        it[extras] = d.extras
                     }
                 } else {
                     ProductDesignsTable.insert {
                         it[ProductDesignsTable.productId] = productId
                         it[name] = d.name.trim(); it[position] = pos
                         it[assignments] = d.assignments; it[overrideSets] = d.overrideSets
+                        it[extras] = d.extras
                     }
                 }
             }
