@@ -43,6 +43,10 @@ data class PushSnapshot(
     val variations: Map<String, List<String>> = emptyMap(),
     val photoDocumentIds: List<Long> = emptyList(), // legacy: uploaded, ids unknown
     val photoMap: List<PhotoLink> = emptyList(), // local doc <-> etsy image (ordered)
+    val personalizable: Boolean = false,
+    val persRequired: Boolean = false,
+    val persCharMax: Int? = null,
+    val persInstructions: String = "",
 )
 
 @Serializable
@@ -129,7 +133,23 @@ class PushService(
             }
         }
         val price = e.inventory?.products?.firstOrNull()?.offerings?.firstOrNull()?.price?.minor ?: 0
-        return PushSnapshot(e.title, e.description, e.tags, price, e.quantity, e.state, axes)
+        return PushSnapshot(
+            e.title, e.description, e.tags, price, e.quantity, e.state, axes,
+            personalizable = e.isPersonalizable,
+            persRequired = e.personalizationIsRequired,
+            persCharMax = e.personalizationCharCountMax,
+            persInstructions = e.personalizationInstructions ?: "",
+        )
+    }
+
+    /** One review row for the whole personalization tuple — Etsy treats it
+     *  as a unit, so we diff and pull it as a unit. */
+    private fun persSummary(s: PushSnapshot): String {
+        if (!s.personalizable) return "off"
+        val bits = mutableListOf("on", if (s.persRequired) "required" else "optional")
+        s.persCharMax?.let { bits += "max $it chars" }
+        if (s.persInstructions.isNotBlank()) bits += "“${s.persInstructions}”"
+        return bits.joinToString(" · ")
     }
 
     /** THE diff — single source of truth for every sync-state surface. */
@@ -158,6 +178,7 @@ class PushService(
             changes += PushChange("details", "Tags", have.tags.joinToString(", "), want.tags.joinToString(", "),
                 if (baseline != null && have.tags.toSet() != baseline.tags.toSet()) "drift" else "changed")
         }
+        field("details", "Personalization", persSummary(have), persSummary(want), baseline?.let { persSummary(it) })
         for ((axis, wantVals) in want.variations) {
             val haveVals = have.variations.entries.firstOrNull { it.key.equals(axis, true) }?.value ?: emptyList()
             wantVals.filter { wv -> haveVals.none { it.equals(wv, true) } }.forEach {
@@ -312,6 +333,12 @@ class PushService(
             put("title", want.title)
             put("description", want.description)
             if (want.tags.isNotEmpty()) put("tags", want.tags.joinToString(","))
+            put("is_personalizable", want.personalizable)
+            if (want.personalizable) {
+                put("personalization_is_required", want.persRequired)
+                want.persCharMax?.let { put("personalization_char_count_max", it) }
+                put("personalization_instructions", want.persInstructions)
+            }
         }
         connections.etsyWriteForm(connId, "/shops/$shopId/listings/$etsyId", details)?.let {
             return fail(listingId, "details: $it")
@@ -411,6 +438,16 @@ class PushService(
             "quantity" -> l.input.copy(quantity = cur.quantity)
             "tags" -> l.input.copy(tags = cur.tags)
             "state" -> l.input.copy(state = if (cur.state in setOf("draft", "active", "inactive")) cur.state else "inactive") // sold_out/expired have no canonical twin
+            // Etsy's single field becomes one text question; compiling it back
+            // yields the same instructions, so the round-trip lands in_sync.
+            "personalization" -> l.input.copy(personalization = if (!e.isPersonalizable) null else app.shopkeep.listings.Personalization(
+                questions = listOf(app.shopkeep.listings.PersonalizationQuestion(
+                    type = "text",
+                    questionText = e.personalizationInstructions ?: "",
+                    required = e.personalizationIsRequired,
+                    maxChars = e.personalizationCharCountMax,
+                )),
+            ))
             else -> return false
         }
         return listings.update(listingId, input)

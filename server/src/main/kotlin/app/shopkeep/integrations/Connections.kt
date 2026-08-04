@@ -124,6 +124,10 @@ data class EtsyShopListing(
     val tags: List<String> = emptyList(),
     val inventory: EtsyInventory? = null,
     val images: List<EtsyListingImage>? = null,
+    @SerialName("is_personalizable") val isPersonalizable: Boolean = false,
+    @SerialName("personalization_is_required") val personalizationIsRequired: Boolean = false,
+    @SerialName("personalization_char_count_max") val personalizationCharCountMax: Int? = null,
+    @SerialName("personalization_instructions") val personalizationInstructions: String? = null,
 )
 
 @Serializable

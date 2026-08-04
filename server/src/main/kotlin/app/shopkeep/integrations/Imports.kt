@@ -164,6 +164,16 @@ class ImportRepository(
                 quantity = payload.quantity,
                 skuMode = "listing_level",
                 tags = payload.tags,
+                // Etsy's single personalization field lands as one text question
+                // so the compiled push shape round-trips without a diff.
+                personalization = if (!payload.isPersonalizable) null else app.shopkeep.listings.Personalization(
+                    questions = listOf(app.shopkeep.listings.PersonalizationQuestion(
+                        type = "text",
+                        questionText = payload.personalizationInstructions ?: "",
+                        required = payload.personalizationIsRequired,
+                        maxChars = payload.personalizationCharCountMax,
+                    )),
+                ),
                 axes = m.axes.mapNotNull { ax ->
                     val mode = ax.mode ?: if (ax.slotPosition != null) "materials" else "modifier"
                     when (mode) {
