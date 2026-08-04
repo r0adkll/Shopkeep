@@ -66,15 +66,21 @@ export function MaterialForm({
   existing,
   categories,
   onClose,
+  initialName,
+  onSaved,
 }: {
   existing?: Material;
   categories: string[];
   onClose: () => void;
+  /** Prefill for create flows (e.g. the importer's on-the-fly create). */
+  initialName?: string;
+  /** Fires with the saved material so callers can chain (e.g. auto-pick it). */
+  onSaved?: (m: Material) => void;
 }) {
   const queryClient = useQueryClient();
   const allMaterials = useQuery({ queryKey: ["materials"], queryFn: inventoryApi.materials });
   const brandSuggestions = [...new Set((allMaterials.data ?? []).map((x) => x.brand).filter((b): b is string => !!b))].sort();
-  const [m, setM] = useState<MaterialInput>(existing ?? EMPTY);
+  const [m, setM] = useState<MaterialInput>(existing ?? (initialName ? { ...EMPTY, name: initialName } : EMPTY));
   const [costDollars, setCostDollars] = useState(existing ? (existing.costMinor / 100).toFixed(2) : "");
   const [initialQty, setInitialQty] = useState("");
   const [color, setColor] = useState(existing?.attributes.color ?? "");
@@ -117,8 +123,9 @@ export function MaterialForm({
         ? inventoryApi.update(existing.id, input)
         : inventoryApi.create(input, parseFloat(initialQty) || undefined);
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["materials"] });
+      onSaved?.(saved);
       onClose();
     },
   });

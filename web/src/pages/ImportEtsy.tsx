@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowLeft, Loader2, RotateCw, Trash2 } from "lucide-reac
 import { ApiError, api } from "../api";
 import { type Material, inventoryApi } from "../inventory/api";
 import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
+import { MaterialForm } from "../inventory/MaterialForm";
 import { type ProductSummary, catalogApi } from "../catalog/api";
 import { NavTabs, Skeleton, Wordmark } from "../ui";
 
@@ -296,6 +297,7 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
   const [error, setError] = useState<string | null>(null);
   const [activated, setActivated] = useState<number | null>(null);
   const [picker, setPicker] = useState<{ ai: number; vi: number } | null>(null);
+  const [creatingFor, setCreatingFor] = useState<{ ai: number; vi: number; name: string } | null>(null);
   const matById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
 
   const resolveValue = (ai: number, vi: number, patch: Partial<ValueMapping>) =>
@@ -505,7 +507,16 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
           onPick={(id) => { resolveValue(picker.ai, picker.vi, { resolution: "material", materialId: id }); setPicker(null); }}
           onReview={() => { resolveValue(picker.ai, picker.vi, { resolution: "review" }); setPicker(null); }}
           onIgnore={() => { resolveValue(picker.ai, picker.vi, { resolution: "ignore" }); setPicker(null); }}
+          onCreateNew={() => { setCreatingFor({ ...picker, name: mapping.axes[picker.ai].values[picker.vi].value }); setPicker(null); }}
           onClose={() => setPicker(null)}
+        />
+      )}
+      {creatingFor && (
+        <MaterialForm
+          categories={[...new Set(materials.map((m) => m.category))]}
+          initialName={creatingFor.name}
+          onSaved={(m) => resolveValue(creatingFor.ai, creatingFor.vi, { resolution: "material", materialId: m.id })}
+          onClose={() => setCreatingFor(null)}
         />
       )}
 
