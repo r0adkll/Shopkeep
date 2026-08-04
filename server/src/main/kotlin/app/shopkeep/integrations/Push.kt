@@ -436,7 +436,9 @@ class PushService(
                         }
                     }
                 }
-                connections.etsyWrite(connId, "POST", "/shops/$shopId/listings/$etsyId/personalization", body.toString())?.let {
+                // capability flag: without it Etsy limits writes to a single
+                // text_input question and may drop the rest of the set
+                connections.etsyWrite(connId, "POST", "/shops/$shopId/listings/$etsyId/personalization?supports_multiple_personalization_questions=true", body.toString())?.let {
                     return fail(listingId, "personalization: $it")
                 }
             }
