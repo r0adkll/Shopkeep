@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { Material } from "../inventory/api";
+import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
 import type { Slot } from "./api";
 
 /* D20 — Designs & Variants tabs (locked concept, tabbed round 3). */
@@ -38,11 +39,31 @@ const matDot = (m: Material | undefined) => (
   <span className="inline-block h-3 w-3 rounded-full border border-line align-[-1px]" style={{ background: m?.attributes?.color ?? "transparent" }} />
 );
 
+/** Trigger chip + the shared searchable picker dialog (replaces the old
+ *  whole-shelf <select> — unusable at 75+ spools). */
 function MatSelect({ materials, value, onChange }: { materials: Material[]; value: number; onChange: (id: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const m = materials.find((x) => x.id === value);
   return (
-    <select value={value} onChange={(e) => onChange(Number(e.target.value))} className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs outline-none focus:border-accent">
-      {materials.filter((m) => !m.archived).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-    </select>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex max-w-64 items-center gap-1.5 rounded-md border border-line bg-panel2 px-2 py-1 text-left text-xs hover:border-accent"
+      >
+        <span className="h-2.5 w-2.5 flex-none rounded-full border border-line" style={{ background: m?.attributes?.color ?? "var(--color-panel2)" }} />
+        <span className="min-w-0 truncate">{m?.name ?? "pick a material…"}</span>
+        {m?.brand && <span className="max-w-24 flex-none truncate text-[10px] text-mut">{m.brand}</span>}
+      </button>
+      {open && (
+        <MaterialPickerDialog
+          all={materials}
+          title={m ? `Replace ${m.name}` : "Pick a material"}
+          onPick={(id) => { onChange(id); setOpen(false); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
