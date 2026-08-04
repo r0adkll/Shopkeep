@@ -135,6 +135,7 @@ data class OrderLineView(
     val priceMinor: Long,
     val matchedSku: String?,
     val matchedListing: Boolean = false,
+    val matchedListingId: Long? = null, // canonical listing behind either match path
     val needsReview: Boolean = false,
     val productName: String?,
     val colors: List<LineColor> = emptyList(),
@@ -755,6 +756,7 @@ class SyncService(
     suspend fun listOrders(): List<OrderView> {
         // configId -> (sku, productName, colors); listingId -> productName
         var listingProductNames = mapOf<Long, String>()
+        var configListing = mapOf<Long, Long>()
         val configInfo = dbQuery {
             val listingProduct = ListingsTable.selectAll().associate {
                 it[ListingsTable.id] to it[ListingsTable.productId]
@@ -765,6 +767,9 @@ class SyncService(
             listingProductNames = listingProduct.mapNotNull { (lid, pid) ->
                 productNames[pid]?.let { lid to it }
             }.toMap()
+            configListing = ListingConfigurationsTable.selectAll().associate {
+                it[ListingConfigurationsTable.id] to it[ListingConfigurationsTable.listingId]
+            }
             ListingConfigurationsTable.selectAll().associate { c ->
                 val pname = listingProduct[c[ListingConfigurationsTable.listingId]]?.let(productNames::get)
                 c[ListingConfigurationsTable.id] to Triple(
@@ -799,6 +804,8 @@ class SyncService(
                         priceMinor = l[OrderLinesTable.priceMinor],
                         matchedSku = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.first },
                         matchedListing = l[OrderLinesTable.matchedListingId] != null,
+                        matchedListingId = l[OrderLinesTable.matchedListingId]
+                            ?: l[OrderLinesTable.listingConfigurationId]?.let(configListing::get),
                         needsReview = l[OrderLinesTable.needsReview],
                         productName = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.second }
                             ?: l[OrderLinesTable.matchedListingId]?.let(listingProductNames::get),

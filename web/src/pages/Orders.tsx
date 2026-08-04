@@ -21,6 +21,7 @@ type OrderLine = {
   priceMinor: number;
   matchedSku: string | null;
   matchedListing: boolean;
+  matchedListingId: number | null;
   needsReview: boolean;
   productName: string | null;
   colors: LineColor[];
@@ -464,7 +465,19 @@ function OrderDetailPanel(props: {
               <div className="mt-4">
                 <div className={SECTION_H}>Items</div>
                 {o.lines.map((l) => (
-                  <div key={l.id} className="mb-2 rounded-lg border border-line/70 px-3 py-2.5">
+                  <div
+                    key={l.id}
+                    onClick={l.matchedListingId != null ? () => {
+                      if (window.getSelection()?.toString()) return; // selecting text ≠ navigating
+                      window.location.href = `/listings?listing=${l.matchedListingId}`;
+                    } : undefined}
+                    title={l.matchedListingId != null ? "open the matched listing" : undefined}
+                    className={`mb-2 rounded-lg px-3 py-2.5 ${
+                      l.matchedListingId != null
+                        ? "group cursor-pointer border border-good/40 border-l-[3px] border-l-good hover:border-accent hover:border-l-accent"
+                        : "border border-line/70"
+                    }`}
+                  >
                     <div className="flex items-center gap-1.5">
                       <span className="flex-none font-mono text-[10.5px] text-mut">{l.quantity}×</span>
                       <span className="min-w-0 truncate text-sm font-bold">{l.productName ?? l.title}</span>
@@ -496,9 +509,15 @@ function OrderDetailPanel(props: {
                     )}
                     <div className="mt-1.5 flex items-center gap-2 border-t border-dotted border-line/60 pt-1 text-[11px]">
                       {l.matchedSku ? (
-                        <span className="font-mono font-semibold text-good">✓ {l.matchedSku}</span>
+                        <>
+                          <span className="font-mono font-semibold text-good">✓ {l.matchedSku}</span>
+                          <span className="ml-auto text-[10px] font-semibold text-accent opacity-0 group-hover:opacity-100">open listing ↗</span>
+                        </>
                       ) : l.matchedListing ? (
-                        <span className="font-mono font-semibold text-good">✓ via listing{l.needsReview ? " · needs review" : ""}</span>
+                        <>
+                          <span className="font-mono font-semibold text-good">✓ via listing{l.needsReview ? <b className="text-warn"> · needs review</b> : ""}</span>
+                          <span className="ml-auto text-[10px] font-semibold text-accent opacity-0 group-hover:opacity-100">open listing ↗</span>
+                        </>
                       ) : (
                         <>
                           <span className="font-mono text-mut">raw sku: {l.rawSku ?? "—"}</span>

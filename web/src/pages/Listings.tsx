@@ -42,6 +42,17 @@ export function ListingsPage() {
     mutationFn: async (l: Listing) => ({ listing: l, product: await catalogApi.product(l.input.productId) }),
     onSuccess: (r) => setEditing(r),
   });
+
+  // ?listing=<id> deep link (order detail's matched-line cards) — open the
+  // editor once the list lands, then clean the URL.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("listing");
+    if (!p || !listings.data || editing) return;
+    const l = listings.data.find((x) => x.id === Number(p));
+    window.history.replaceState({}, "", "/listings");
+    if (l) open.mutate(l);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listings.data]);
   const startNew = useMutation({
     mutationFn: (productId: number) => catalogApi.product(productId),
     onSuccess: (product) => {
