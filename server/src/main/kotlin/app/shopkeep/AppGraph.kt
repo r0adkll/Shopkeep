@@ -43,6 +43,7 @@ interface AppGraph {
     val importRepository: ImportRepository
     val designRepository: DesignRepository
     val pushService: PushService
+    val vendorPrefillService: app.shopkeep.inventory.VendorPrefillService
 
     @Provides
     @SingleIn(AppScope::class)

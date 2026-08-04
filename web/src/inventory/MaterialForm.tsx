@@ -133,10 +133,62 @@ export function MaterialForm({
   const num = (v: string) => (v === "" ? null : parseFloat(v) || 0);
   const isFilament = !!profile?.colorPrimary;
 
+  // Paste-a-vendor-link prefill: fills only fields still untouched.
+  const [prefillUrl, setPrefillUrl] = useState("");
+  const [prefillNote, setPrefillNote] = useState<string | null>(null);
+  const prefill = useMutation({
+    mutationFn: () => inventoryApi.prefill(prefillUrl.trim()),
+    onSuccess: (r) => {
+      setM((prev) => ({
+        ...prev,
+        name: prev.name || r.name || "",
+        brand: prev.brand || r.brand || prev.brand,
+        category: prev.category || r.category || prev.category,
+        type: prev.type || r.type || prev.type,
+        unit: prev.unit || r.unit || prev.unit,
+        currency: r.currency || prev.currency,
+        costQuantity: prev.costQuantity !== 1 ? prev.costQuantity : (r.costQuantity ?? prev.costQuantity),
+        fullQuantity: prev.fullQuantity ?? r.fullQuantity ?? null,
+        vendorUrl: r.vendorUrl,
+      }));
+      if (r.costMinor != null && !costDollars) setCostDollars((r.costMinor / 100).toFixed(2));
+      if (r.colorHex && !color) setColor(r.colorHex);
+      setPrefillNote(
+        r.source === "none"
+          ? (r.note ?? "Nothing found on that page — URL kept.")
+          : `Found (${r.source})${r.rawTitle ? `: ${r.rawTitle.slice(0, 80)}` : ""}${r.colorName ? ` · color: ${r.colorName}` : ""}`,
+      );
+    },
+    onError: (e) => setPrefillNote(e instanceof Error ? e.message : "Prefill failed."),
+  });
+
   return (
     <div className="fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/40 p-6" onClick={onClose}>
       <div className="w-full max-w-lg rounded-xl border border-line bg-panel p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <h2 className="mb-4 text-lg font-semibold">{existing ? `Edit ${existing.name}` : "New material"}</h2>
+        {!existing && (
+          <div className="mb-4 rounded-lg border border-dashed border-line bg-panel2 p-3">
+            <div className="flex gap-2">
+              <input
+                value={prefillUrl}
+                onChange={(e) => setPrefillUrl(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (prefillUrl.trim()) prefill.mutate(); } }}
+                placeholder="Paste a product link (Overture, Polymaker, Bambu Lab, …) to prefill"
+                className="min-w-0 flex-1 rounded-md border border-line bg-panel px-3 py-1.5 text-sm outline-none placeholder:text-mut focus:border-accent"
+              />
+              <button
+                type="button"
+                onClick={() => prefill.mutate()}
+                disabled={prefill.isPending || !prefillUrl.trim()}
+                className="rounded-md border border-accent/40 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/5 disabled:opacity-50"
+              >
+                {prefill.isPending ? "Fetching…" : "Prefill"}
+              </button>
+            </div>
+            {prefillNote && <p className="mt-1.5 text-[11px] text-ink2">{prefillNote}</p>}
+            <p className="mt-1 text-[10.5px] text-mut">Fills only fields you haven't touched — everything stays editable. Amazon links often block fetches; the URL is kept either way.</p>
+          </div>
+        )}
         <form
           className="space-y-4"
           onSubmit={(e) => {

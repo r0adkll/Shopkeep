@@ -38,6 +38,24 @@ export type LedgerEntry = {
 
 export type MaterialDetail = { material: Material; ledger: LedgerEntry[] };
 
+export type PrefillResult = {
+  vendorUrl: string;
+  source: "shopify" | "jsonld" | "og" | "none";
+  name?: string | null;
+  brand?: string | null;
+  category?: string | null;
+  type?: string | null;
+  unit?: string | null;
+  costMinor?: number | null;
+  currency?: string | null;
+  costQuantity?: number | null;
+  fullQuantity?: number | null;
+  colorName?: string | null;
+  colorHex?: string | null;
+  rawTitle?: string | null;
+  note?: string | null;
+};
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/v1/inventory${path}`, {
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
@@ -62,6 +80,8 @@ export const inventoryApi = {
     req<Material>(`/materials/${id}/archive`, { method: "POST", body: JSON.stringify({ archived }) }),
   deleteMaterial: (id: number) => req<void>(`/materials/${id}`, { method: "DELETE" }),
   material: (id: number) => req<MaterialDetail>(`/materials/${id}`),
+  prefill: (url: string) =>
+    req<PrefillResult>("/materials/prefill", { method: "POST", body: JSON.stringify({ url }) }),
   create: (material: MaterialInput, initialQuantity?: number) =>
     req<Material>("/materials", {
       method: "POST",

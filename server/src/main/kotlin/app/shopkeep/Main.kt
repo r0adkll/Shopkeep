@@ -14,6 +14,7 @@ import app.shopkeep.integrations.pushRoutes
 import app.shopkeep.integrations.mockEtsyRoutes
 import app.shopkeep.listings.listingRoutes
 import app.shopkeep.inventory.inventoryRoutes
+import app.shopkeep.inventory.vendorPrefillRoutes
 import app.shopkeep.config.AppConfig
 import app.shopkeep.db.connectExposed
 import app.shopkeep.db.createDataSource
@@ -115,6 +116,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             authRoutes(graph.userRepository)
             oidcRoutes(graph.oidcService, graph.userRepository)
             inventoryRoutes(graph.materialRepository)
+            vendorPrefillRoutes(graph.vendorPrefillService)
             catalogRoutes(graph.productRepository)
             documentRoutes(graph.documentRepository)
             listingRoutes(graph.listingRepository)
