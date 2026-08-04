@@ -416,10 +416,10 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
                           <>
                             <span className="h-2.5 w-2.5 flex-none rounded-full border border-line"
                               style={{ background: matById.get(v.materialId)?.attributes?.color || "var(--color-panel2)" }} />
-                            <span className="truncate">
-                              {matById.get(v.materialId)?.brand && <span className="text-mut">{matById.get(v.materialId)!.brand} </span>}
-                              {matById.get(v.materialId)?.name ?? `material ${v.materialId}`}
-                            </span>
+                            <span className="min-w-0 flex-1 truncate">{matById.get(v.materialId)?.name ?? `material ${v.materialId}`}</span>
+                            {matById.get(v.materialId)?.brand && (
+                              <span className="max-w-24 flex-none truncate text-[10px] text-mut">{matById.get(v.materialId)!.brand}</span>
+                            )}
                           </>
                         ) : v.resolution === "review" ? (
                           <span className="text-ink2">review per order</span>
