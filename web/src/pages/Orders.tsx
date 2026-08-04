@@ -188,19 +188,9 @@ export function OrdersPage() {
   const [overLane, setOverLane] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
-  const [rematchMsg, setRematchMsg] = useState<string | null>(null);
   const [boardSort, setBoardSort] = useState<BoardSort>(
     () => (localStorage.getItem("orders.sort") as BoardSort) || "ship_by",
   );
-  const rematch = useMutation({
-    mutationFn: () => jsonFetch<{ backfilled: number; matched: number }>("/api/v1/orders/rematch", { method: "POST" }),
-    onSuccess: (r) => {
-      setRematchMsg(`${r.backfilled} listing id${r.backfilled === 1 ? "" : "s"} backfilled · ${r.matched} line${r.matched === 1 ? "" : "s"} matched`);
-      qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["order"] });
-    },
-    onError: (e) => setRematchMsg(e instanceof Error ? e.message : "Re-run failed"),
-  });
 
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
   const isAdmin = me.data.role === "ADMIN";
@@ -225,15 +215,6 @@ export function OrdersPage() {
         </button>
         {isAdmin && (
           <span className="flex items-center gap-2.5">
-            {rematchMsg && <span className="text-xs text-ink2">{rematchMsg}</span>}
-            <button
-              onClick={() => rematch.mutate()}
-              disabled={rematch.isPending}
-              title="Backfill listing ids from Etsy receipts, then retro-match unmatched lines against activated listings and remembered matches"
-              className="flex items-center gap-1.5 rounded-lg border border-line px-3.5 py-1.5 text-sm font-semibold text-ink2 transition-colors hover:text-ink disabled:opacity-50"
-            >
-              <RefreshCw size={15} className={rematch.isPending ? "animate-spin" : ""} /> Re-run matching
-            </button>
             <button
               onClick={() => setEditing((e) => !e)}
               className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-semibold transition-colors ${
