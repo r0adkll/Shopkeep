@@ -131,6 +131,12 @@ const shipByTone = (iso: string) => {
 // deadline-first: soonest ship-by leads; no-deadline cards fall back to oldest placed
 const byDeadline = (a: Order, b: Order) =>
   (a.shipBy ?? "9999").localeCompare(b.shipBy ?? "9999") || (a.placedAt ?? "").localeCompare(b.placedAt ?? "");
+type BoardSort = "ship_by" | "newest" | "oldest";
+const BOARD_SORTS: Record<BoardSort, (a: Order, b: Order) => number> = {
+  ship_by: byDeadline,
+  newest: (a, b) => (b.placedAt ?? "").localeCompare(a.placedAt ?? ""),
+  oldest: (a, b) => (a.placedAt ?? "").localeCompare(b.placedAt ?? ""),
+};
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init);
@@ -183,6 +189,9 @@ export function OrdersPage() {
   const [editing, setEditing] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
   const [rematchMsg, setRematchMsg] = useState<string | null>(null);
+  const [boardSort, setBoardSort] = useState<BoardSort>(
+    () => (localStorage.getItem("orders.sort") as BoardSort) || "ship_by",
+  );
   const rematch = useMutation({
     mutationFn: () => jsonFetch<{ backfilled: number; matched: number }>("/api/v1/orders/rematch", { method: "POST" }),
     onSuccess: (r) => {
@@ -210,8 +219,24 @@ export function OrdersPage() {
       <header className="mb-5 flex flex-wrap items-center gap-5 border-b border-line py-5">
         <Wordmark />
         <NavTabs active="Orders" />
+        <label className="ml-auto flex items-center gap-1.5 text-xs text-mut">
+          sort
+          <select
+            value={boardSort}
+            onChange={(e) => {
+              const v = e.target.value as BoardSort;
+              setBoardSort(v);
+              localStorage.setItem("orders.sort", v);
+            }}
+            className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs text-ink outline-none focus:border-accent"
+          >
+            <option value="ship_by">Ship by date</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+          </select>
+        </label>
         <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}
-          className={`ml-auto rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
+          className={`rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
           archived
         </button>
         {isAdmin && (
@@ -265,7 +290,7 @@ export function OrdersPage() {
           style={{ gridTemplateColumns: `repeat(${Math.max(laneList.length, 1)}, minmax(215px, 1fr))` }}
         >
           {laneList.map((lane) => {
-            const cards = all.filter((o) => o.laneId === lane.id).sort(byDeadline);
+            const cards = all.filter((o) => o.laneId === lane.id).sort(BOARD_SORTS[boardSort]);
             return (
               <div
                 key={lane.id}
@@ -330,7 +355,7 @@ export function OrdersPage() {
         <OrderDetailPanel
           orderId={openId}
           lanes={laneList}
-          boardOrder={laneList.flatMap((l) => all.filter((o) => o.laneId === l.id).sort(byDeadline).map((o) => o.id))}
+          boardOrder={laneList.flatMap((l) => all.filter((o) => o.laneId === l.id).sort(BOARD_SORTS[boardSort]).map((o) => o.id))}
           onNavigate={setOpenId}
           onClose={() => setOpenId(null)}
           onMove={(orderId, laneId) => move.mutate({ orderId, laneId })}
