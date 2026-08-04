@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { ExternalLink, ImageDown, Plus, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PushReview } from "./PushReview";
@@ -125,6 +125,10 @@ export function ListingEditor({
     enabled: !!existing?.etsyListingId && !dirty,
     staleTime: 60_000,
   });
+  // preview persists sync_state server-side — mirror it to the list cards
+  useEffect(() => {
+    if (pushPreview.data) queryClient.invalidateQueries({ queryKey: ["listings"] });
+  }, [pushPreview.data, queryClient]);
 
   const mat = (id: number | null | undefined) => (id == null ? undefined : byId.get(id));
 

@@ -117,15 +117,12 @@ export function ListingsPage() {
             {(listings.data ?? []).map((l) => {
               const SYNC: Record<string, [string, string]> = {
                 in_sync: ["IN SYNC", "bg-good/10 text-good"],
+                pending: ["CHANGES TO PUSH", "bg-warn/10 text-warn"],
                 drifted: ["DRIFTED", "bg-warn/10 text-warn"],
                 imported: ["NEEDS MAPPING", "bg-warn/10 text-warn"],
                 not_published: ["NOT PUBLISHED", "bg-panel2 text-mut"],
               };
-              // Pending local changes outrank the stored platform state:
-              // canonical vs last-pushed baseline is computed fresh per read.
-              const [syncLabel, syncTone] = l.pendingPush
-                ? ["CHANGES TO PUSH", "bg-warn/10 text-warn"]
-                : SYNC[l.syncState] ?? [l.syncState.replace("_", " ").toUpperCase(), "bg-panel2 text-mut"];
+              const [syncLabel, syncTone] = SYNC[l.syncState] ?? [l.syncState.replace("_", " ").toUpperCase(), "bg-panel2 text-mut"];
               return (
               <button key={l.id} type="button" onClick={() => open.mutate(l)} className="rounded-xl border border-line bg-panel p-5 text-left shadow-sm hover:border-accent">
                 <div className="flex items-center gap-2.5">

@@ -504,21 +504,10 @@ class ListingRepository(private val products: ProductRepository) {
             val archivedIds = app.shopkeep.inventory.MaterialsTable.selectAll()
                 .where { app.shopkeep.inventory.MaterialsTable.archivedAt.isNotNull() }
                 .map { it[app.shopkeep.inventory.MaterialsTable.id] }.toSet()
-            // Field equality must ignore the snapshot's photo bookkeeping (the
-            // freshly-derived shape never has it); photos get their own check.
-            val fieldsPending = snap != null &&
-                snap.copy(photoDocumentIds = emptyList(), photoMap = emptyList()) != l.input.pushShapeActive(archivedIds)
-            val photosPending = snap != null && run {
-                val tracked = snap.photoMap.map { it.docId } + snap.photoDocumentIds
-                val localIds = l.input.imageDocumentIds
-                val mappedOrder = snap.photoMap.map { it.docId }.filter { it in localIds }
-                val keptOrder = localIds.filter { d -> snap.photoMap.any { it.docId == d } }
-                localIds.any { it !in tracked } ||
-                    snap.photoMap.any { it.docId !in localIds } ||
-                    keptOrder != mappedOrder
-            }
+            // One diff engine (PushService) persists sync_state; the list just
+            // mirrors it — no parallel comparison to disagree with the editor.
             l.copy(
-                pendingPush = fieldsPending || photosPending,
+                pendingPush = row[ListingsTable.syncState] == "pending",
                 syncCheckedAt = row[ListingsTable.syncCheckedAt]?.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             )
         }

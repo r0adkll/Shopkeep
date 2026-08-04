@@ -106,22 +106,17 @@ class PushService(
     suspend fun refreshSyncStates(connectionId: Long) {
         val platform = connections.fetchShopListings(connectionId) ?: return
         val byId = platform.associateBy { it.listingId.toString() }
-        val rows = dbQuery {
-            ListingsTable.selectAll().where { ListingsTable.etsyListingId.isNotNull() }.map {
-                Triple(it[ListingsTable.id], it[ListingsTable.etsyListingId]!!, it[ListingsTable.pushedSnapshot])
-            }
+        val ids = dbQuery {
+            ListingsTable.selectAll().where { ListingsTable.etsyListingId.isNotNull() }
+                .map { it[ListingsTable.id] to it[ListingsTable.etsyListingId]!! }
         }
-        val now = OffsetDateTime.now()
-        for ((id, etsyId, snapshot) in rows) {
+        val archived = archivedIds()
+        for ((id, etsyId) in ids) {
             val current = byId[etsyId] ?: continue
-            val drifted = snapshot != null && etsyShape(current) != snapshot
-            dbQuery {
-                ListingsTable.update({ ListingsTable.id eq id }) {
-                    it[syncState] = if (drifted) "drifted" else "in_sync"
-                    it[platformState] = current.state
-                    it[syncCheckedAt] = now
-                }
-            }
+            val l = listings.get(id) ?: continue
+            val changes = buildChanges(l, l.input.pushShapeActive(archived), current, baselineFor(id, etsyId))
+            persistState(id, changes)
+            dbQuery { ListingsTable.update({ ListingsTable.id eq id }) { it[platformState] = current.state } }
         }
     }
 
@@ -137,23 +132,14 @@ class PushService(
         return PushSnapshot(e.title, e.description, e.tags, price, e.quantity, e.state, axes)
     }
 
-    suspend fun preview(listingId: Long): PushPreview {
-        val (want, l) = desired(listingId) ?: return PushPreview(listingId, null, emptyList(), 0, false, 0, false, "Listing not found.")
-        val etsyId = l.etsyListingId
-            ?: return PushPreview(listingId, null, emptyList(), 0, false, 0, false, "Not linked to Etsy yet — v1 pushes updates to linked listings (create the draft on Etsy or import first).")
-        val connId = connectionId()
-            ?: return PushPreview(listingId, etsyId, emptyList(), 0, false, 0, false, "No connected Etsy shop.")
-        val current = connections.fetchListing(connId, etsyId)
-            ?: return PushPreview(listingId, etsyId, emptyList(), 0, false, 0, false, "Couldn't fetch the listing from Etsy.")
+    /** THE diff — single source of truth for every sync-state surface. */
+    private fun buildChanges(
+        l: app.shopkeep.listings.Listing,
+        want: PushSnapshot,
+        current: EtsyShopListing,
+        baseline: PushSnapshot?,
+    ): MutableList<PushChange> {
         val have = etsyShape(current)
-        val baseline: PushSnapshot? = dbQuery {
-            ListingsTable.selectAll().where { ListingsTable.id eq listingId }.singleOrNull()
-                ?.get(ListingsTable.pushedSnapshot)
-        } ?: dbQuery {
-            EtsyImportsTable.selectAll().where { EtsyImportsTable.etsyListingId eq etsyId }.singleOrNull()
-                ?.get(EtsyImportsTable.payload)?.let { etsyShape(it) }
-        }
-
         val changes = mutableListOf<PushChange>()
         fun field(section: String, name: String, old: String?, new: String?, base: String?) {
             if (old == new) return
@@ -161,8 +147,6 @@ class PushService(
             changes += PushChange(section, name, old, new, if (drift) "drift" else "changed")
         }
         field("details", "Title", have.title, want.title, baseline?.title)
-        // full text on the wire; the review UI truncates collapsed rows and
-        // renders a word-level merged diff when expanded
         if (have.description != want.description) {
             val drift = baseline != null && have.description != baseline.description
             changes += PushChange("details", "Description", have.description, want.description, if (drift) "drift" else "changed")
@@ -186,10 +170,6 @@ class PushService(
         have.variations.keys.filter { hk -> want.variations.keys.none { it.equals(hk, true) } }.forEach {
             changes += PushChange("variations", it, "axis on Etsy", null, "removed", "whole axis removed")
         }
-
-        // Photos: full state sync via the doc<->image map (built by pull /
-        // recorded on upload). Legacy uploads without ids can't be deleted
-        // remotely — pull photos to relink.
         val photoMap = baseline?.photoMap ?: emptyList()
         val legacy = (baseline?.photoDocumentIds ?: emptyList()).filter { d -> photoMap.none { it.docId == d } }
         val tracked = photoMap.map { it.docId } + legacy
@@ -214,6 +194,45 @@ class PushService(
         if (reordered && removed.isEmpty() && newPhotos.isEmpty()) {
             changes += PushChange("photos", "Photos", "order on Etsy", "local order", "changed", "re-ranks on push")
         }
+        return changes
+    }
+
+    /** Persist the outcome so list cards mirror whatever the diff last said. */
+    private suspend fun persistState(listingId: Long, changes: List<PushChange>) {
+        val state = when {
+            changes.any { it.kind == "drift" } -> "drifted"
+            changes.isNotEmpty() -> "pending"
+            else -> "in_sync"
+        }
+        dbQuery {
+            ListingsTable.update({ ListingsTable.id eq listingId }) {
+                it[syncState] = state
+                it[syncCheckedAt] = OffsetDateTime.now()
+            }
+        }
+    }
+
+    private suspend fun baselineFor(listingId: Long, etsyId: String): PushSnapshot? = dbQuery {
+        ListingsTable.selectAll().where { ListingsTable.id eq listingId }.singleOrNull()
+            ?.get(ListingsTable.pushedSnapshot)
+    } ?: dbQuery {
+        EtsyImportsTable.selectAll().where { EtsyImportsTable.etsyListingId eq etsyId }.singleOrNull()
+            ?.get(EtsyImportsTable.payload)?.let { etsyShape(it) }
+    }
+
+    suspend fun preview(listingId: Long): PushPreview {
+        val (want, l) = desired(listingId) ?: return PushPreview(listingId, null, emptyList(), 0, false, 0, false, "Listing not found.")
+        val etsyId = l.etsyListingId
+            ?: return PushPreview(listingId, null, emptyList(), 0, false, 0, false, "Not linked to Etsy yet — v1 pushes updates to linked listings (create the draft on Etsy or import first).")
+        val connId = connectionId()
+            ?: return PushPreview(listingId, etsyId, emptyList(), 0, false, 0, false, "No connected Etsy shop.")
+        val current = connections.fetchListing(connId, etsyId)
+            ?: return PushPreview(listingId, etsyId, emptyList(), 0, false, 0, false, "Couldn't fetch the listing from Etsy.")
+        val have = etsyShape(current)
+        val baseline = baselineFor(listingId, etsyId)
+        val changes = buildChanges(l, want, current, baseline)
+        persistState(listingId, changes)
+
 
         val comboCount = want.variations.values.fold(1) { a, v -> a * maxOf(v.size, 1) }
         val renewal = have.state == "sold_out" && want.quantity > 0 && want.state == "active"
