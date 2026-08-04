@@ -421,6 +421,16 @@ function OrderDetailPanel(props: {
               <button onClick={onClose} title="close (esc)" className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-panel2 text-ink2 hover:border-accent hover:text-ink"><X size={14} /></button>
             </span>
           </div>
+          {o?.shipBy && (
+            <div className="mt-1.5">
+              <span
+                title="Etsy expected ship date"
+                className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider uppercase ${shipByTone(o.shipBy)}`}
+              >
+                {shipByLabel(o.shipBy)} · {new Date(o.shipBy).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+              </span>
+            </div>
+          )}
           <div className="mt-1.5 flex flex-wrap items-center gap-2.5 text-xs text-ink2">
             <span className="font-mono">#{o?.platformOrderId}</span>
             {o && (
@@ -434,14 +444,6 @@ function OrderDetailPanel(props: {
               </a>
             )}
             {o?.placedAt && <span>placed {age(o.placedAt)} ago</span>}
-            {o?.shipBy && (
-              <span
-                title="Etsy expected ship date"
-                className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider uppercase ${shipByTone(o.shipBy)}`}
-              >
-                {shipByLabel(o.shipBy)} · {new Date(o.shipBy).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-              </span>
-            )}
             <span className="flex items-center gap-1.5">
               <span className="text-[10px] font-extrabold tracking-widest text-mut">LANE</span>
               <select
@@ -934,20 +936,20 @@ function OrderCard(props: {
     >
       <div className="flex items-baseline gap-1.5">
         <span className="min-w-0 truncate text-[13px] font-[650]">{o.buyerName || "Unknown buyer"}</span>
-        <span className="ml-auto flex items-center gap-1.5">
-          {o.shipBy && (
-            <span
-              title={`Etsy expected ship date: ${new Date(o.shipBy).toLocaleDateString()}`}
-              className={`rounded-full px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider whitespace-nowrap uppercase ${shipByTone(o.shipBy)}`}
-            >
-              {shipByLabel(o.shipBy)}
-            </span>
-          )}
-          <span className={`font-mono text-[10.5px] whitespace-nowrap ${old ? "font-bold text-warn" : "text-mut"}`}>
-            {orderAge}
-          </span>
+        <span className={`ml-auto font-mono text-[10.5px] whitespace-nowrap ${old ? "font-bold text-warn" : "text-mut"}`}>
+          {orderAge}
         </span>
       </div>
+      {o.shipBy && (
+        <div className="mt-1">
+          <span
+            title={`Etsy expected ship date: ${new Date(o.shipBy).toLocaleDateString()}`}
+            className={`rounded-full px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider whitespace-nowrap uppercase ${shipByTone(o.shipBy)}`}
+          >
+            {shipByLabel(o.shipBy)}
+          </span>
+        </div>
+      )}
 
       <div className="mt-1.5 grid gap-1">
         {o.lines.map((l) => {
