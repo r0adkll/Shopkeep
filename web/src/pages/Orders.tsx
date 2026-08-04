@@ -395,7 +395,7 @@ function OrderDetailPanel(props: {
               </a>
             )}
             {o?.placedAt && <span>placed {age(o.placedAt)} ago</span>}
-            <span className="ml-auto flex items-center gap-1.5">
+            <span className="flex items-center gap-1.5">
               <span className="text-[10px] font-extrabold tracking-widest text-mut">LANE</span>
               <select
                 value={o?.laneId ?? ""}
