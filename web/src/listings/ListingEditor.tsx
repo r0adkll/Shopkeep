@@ -1109,8 +1109,9 @@ function PersonalizationEditor({
           )}
           {q.type === "dropdown" && (
             <input
-              value={q.options.join(", ")}
-              onChange={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x)))}
+              key={`opts-${i}-${q.options.join("|")}`}
+              defaultValue={q.options.join(", ")}
+              onBlur={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x)))}
               placeholder="options, comma-separated (≤20 chars each)"
               className="w-56 rounded border border-line bg-panel2 px-2 py-1 text-xs"
             />
@@ -1126,8 +1127,9 @@ function PersonalizationEditor({
                 className="w-20 rounded border border-line bg-panel2 px-2 py-1 text-xs disabled:opacity-60"
               />
               <input
-                value={q.options.join(", ")}
-                onChange={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x)))}
+                key={`labels-${i}-${q.options.join("|")}`}
+                defaultValue={q.options.join(", ")}
+                onBlur={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x)))}
                 placeholder="file labels, comma-separated (optional)"
                 className="w-56 rounded border border-line bg-panel2 px-2 py-1 text-xs"
               />
