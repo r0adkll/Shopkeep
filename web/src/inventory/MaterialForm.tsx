@@ -1,7 +1,66 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { HexColorPicker } from "react-colorful";
 import { inventoryApi, type Material, type MaterialInput } from "./api";
 import { Button, ErrorText, Field } from "../ui";
+
+/** Swatch + hex field opening a proper picker popover (react-colorful),
+ *  with quick swatches from colors already on the shelf. */
+function ColorField({ value, onChange, presets }: { value: string; onChange: (v: string) => void; presets: string[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const valid = /^#[0-9a-fA-F]{6}$/.test(value);
+  return (
+    <div ref={ref} className="relative">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          title={value || "pick a color"}
+          className="h-9 w-14 rounded border border-line"
+          style={valid ? { background: value } : { background: "repeating-conic-gradient(var(--color-panel2) 0% 25%, var(--color-panel) 0% 50%) 0 0 / 12px 12px" }}
+        />
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value.trim())}
+          onFocus={() => setOpen(true)}
+          placeholder="#RRGGBB"
+          className={`w-24 rounded-md border bg-panel2 px-2 py-1.5 font-mono text-sm outline-none focus:border-accent ${value && !valid ? "border-warn" : "border-line"}`}
+        />
+        <button type="button" onClick={() => { onChange(""); setOpen(false); }} className="text-xs text-mut hover:text-ink">
+          {value ? "clear" : "none"}
+        </button>
+      </div>
+      {open && (
+        <div className="absolute z-20 mt-2 rounded-xl border border-line bg-panel p-3 shadow-lg">
+          <HexColorPicker color={valid ? value : "#888888"} onChange={onChange} />
+          {presets.length > 0 && (
+            <div className="mt-2.5 flex max-w-[200px] flex-wrap gap-1.5">
+              {presets.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  title={p}
+                  onClick={() => onChange(p)}
+                  className={`h-5 w-5 rounded-full border ${p.toLowerCase() === value.toLowerCase() ? "border-accent ring-1 ring-accent" : "border-line"}`}
+                  style={{ background: p }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * Category-aware material form. Filament is a first-class citizen: curated
@@ -298,20 +357,15 @@ export function MaterialForm({
               <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">
                 {isFilament ? "Filament color" : "Color (optional)"}
               </span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : "#888888"}
-                  onChange={(e) => setColor(e.target.value)}
-                  className="h-9 w-14 cursor-pointer rounded border border-line bg-panel2"
-                />
-                {isFilament && color && (
-                  <span className="inline-block h-6 w-6 rounded-full border-4 border-line" style={{ borderColor: color }} aria-hidden="true" />
-                )}
-                <button type="button" onClick={() => setColor("")} className="text-xs text-mut hover:text-ink">
-                  {color ? "clear" : "none"}
-                </button>
-              </div>
+              <ColorField
+                value={color}
+                onChange={setColor}
+                presets={[...new Set(
+                  (allMaterials.data ?? [])
+                    .map((x) => x.attributes.color)
+                    .filter((c): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c)),
+                )].slice(0, 21)}
+              />
               {isFilament && !color && <span className="mt-1 block text-[11px] text-warn">Spool gauges use this color on the wall.</span>}
             </label>
 
