@@ -106,6 +106,9 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
         while (true) {
             runCatching { graph.syncService.syncAll() }
                 .onFailure { log.warn("storefront sync failed: ${it.message}") }
+            // Q8: completed orders leave the active board after the window.
+            runCatching { graph.syncService.archiveCompleted(config.orderArchiveDays) }
+                .onFailure { log.warn("order archive sweep failed: ${it.message}") }
             delay(config.syncIntervalMinutes * 60_000)
         }
     }

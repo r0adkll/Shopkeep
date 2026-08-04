@@ -45,7 +45,7 @@ fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService
         // Storefront config is admin-only (vault: Users & Auth role matrix).
         get("/integrations/connections") { call.respond(connections.list()) }
 
-        get("/orders") { call.respond(sync.listOrders()) }
+        get("/orders") { call.respond(sync.listOrders(call.request.queryParameters["includeArchived"] == "true")) }
 
         // Phase 4 matching tooling: on-demand retro-match sweep + manual match.
         post("/orders/rematch") { call.respond(sync.rematchAll()) }

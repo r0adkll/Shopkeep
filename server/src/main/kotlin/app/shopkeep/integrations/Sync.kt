@@ -18,7 +18,9 @@ import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.andWhere
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.deleteWhere
 import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.insertIgnore
@@ -70,6 +72,7 @@ object OrdersTable : Table("orders") {
     val platformPaid = bool("platform_paid")
     val platformShipped = bool("platform_shipped")
     val platformStatus = text("platform_status")
+    val archivedAt = timestampWithTimeZone("archived_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -181,6 +184,7 @@ data class OrderView(
     val flagShort: Boolean,
     val flagAdhoc: Boolean,
     val platformStatus: String,
+    val archived: Boolean = false,
     val lines: List<OrderLineView>,
 )
 
@@ -496,6 +500,20 @@ class SyncService(
         }
     }
 
+    /** Q8 sweep: completed (or long-dead) orders leave the active board
+     *  after the window; never deleted. Rides the poll loop daily-ish. */
+    suspend fun archiveCompleted(days: Long): Int = dbQuery {
+        val cutoff = OffsetDateTime.now().minusDays(days)
+        OrdersTable.update({
+            org.jetbrains.exposed.sql.SqlExpressionBuilder.run {
+                OrdersTable.archivedAt.isNull() and (
+                    (OrdersTable.completedAt.isNotNull() and OrdersTable.completedAt.less(cutoff)) or
+                    (OrdersTable.platformStatus.inList(listOf("canceled", "fully refunded")) and OrdersTable.ingestedAt.less(cutoff))
+                )
+            }
+        }) { it[archivedAt] = OffsetDateTime.now() }
+    }
+
     /** Cancellation: outstanding reservations come back (lifecycle invariant #3). */
     private suspend fun releaseReservations(platformOrderId: String) = dbQuery {
         val note = "Order #$platformOrderId"
@@ -529,10 +547,37 @@ class SyncService(
      *  values -> materials via platform_value. Values with no mapping (review /
      *  ignore / unknown) leave a gap and flag the line for review. */
     private suspend fun resolveImportedLine(txn: EtsyTransaction): ImportedResolution? {
-        val etsyId = txn.listingId?.toString() ?: return null
-        val targetId = resolvableListingId(etsyId) ?: return null
+        val targetId = txn.listingId?.toString()?.let { resolvableListingId(it) }
+            ?: listingByPrimarySku(txn.sku)
+            ?: return null
         val listing = listings.get(targetId) ?: return null
         return resolveWithListing(listing, txn)
+    }
+
+    /** Per-primary fallback: a per_primary listing whose primary axis value
+     *  carries this SKU claims the line; other axes resolve from variations. */
+    private suspend fun listingByPrimarySku(sku: String?): Long? {
+        if (sku.isNullOrBlank()) return null
+        return dbQuery {
+            app.shopkeep.listings.ListingAxisValuesTable
+                .join(
+                    app.shopkeep.listings.ListingAxesTable,
+                    org.jetbrains.exposed.sql.JoinType.INNER,
+                    onColumn = app.shopkeep.listings.ListingAxisValuesTable.axisId,
+                    otherColumn = app.shopkeep.listings.ListingAxesTable.id,
+                )
+                .join(
+                    ListingsTable,
+                    org.jetbrains.exposed.sql.JoinType.INNER,
+                    onColumn = app.shopkeep.listings.ListingAxesTable.listingId,
+                    otherColumn = ListingsTable.id,
+                )
+                .selectAll()
+                .where { app.shopkeep.listings.ListingAxisValuesTable.platformSku eq sku }
+                .andWhere { ListingsTable.skuMode eq "per_primary" }
+                .andWhere { ListingsTable.archivedAt.isNull() }
+                .firstOrNull()?.get(ListingsTable.id)
+        }
     }
 
     /** Which canonical listing handles this platform listing id, if any —
@@ -870,7 +915,7 @@ class SyncService(
         return short
     }
 
-    suspend fun listOrders(): List<OrderView> {
+    suspend fun listOrders(includeArchived: Boolean = false): List<OrderView> {
         // configId -> (sku, productName, colors); listingId -> productName
         var listingProductNames = mapOf<Long, String>()
         var listingTitles = mapOf<Long, String>()
@@ -901,7 +946,9 @@ class SyncService(
             }
         }
         return dbQuery {
-        OrdersTable.selectAll().orderBy(OrdersTable.id, org.jetbrains.exposed.sql.SortOrder.DESC).map { o ->
+        OrdersTable.selectAll()
+            .let { q -> if (includeArchived) q else q.where { OrdersTable.archivedAt.isNull() } }
+            .orderBy(OrdersTable.id, org.jetbrains.exposed.sql.SortOrder.DESC).map { o ->
             val oid = o[OrdersTable.id]
             OrderView(
                 id = oid,
@@ -916,6 +963,7 @@ class SyncService(
                 flagShort = o[OrdersTable.flagShort],
                 flagAdhoc = o[OrdersTable.flagAdhoc],
                 platformStatus = o[OrdersTable.platformStatus],
+                archived = o[OrdersTable.archivedAt] != null,
                 lines = OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq oid }.map { l ->
                     OrderLineView(
                         id = l[OrderLinesTable.id],
@@ -947,7 +995,7 @@ class SyncService(
 
     /** Everything the order detail panel shows (locked concept, 2026-08-02). */
     suspend fun orderDetail(orderId: Long): OrderDetail? {
-        val summary = listOrders().firstOrNull { it.id == orderId } ?: return null
+        val summary = listOrders(includeArchived = true).firstOrNull { it.id == orderId } ?: return null
         val o = dbQuery { OrdersTable.selectAll().where { OrdersTable.id eq orderId }.singleOrNull() } ?: return null
         val completed = o[OrdersTable.completedAt] != null
         val notePrefix = "Order #${o[OrdersTable.platformOrderId]}"

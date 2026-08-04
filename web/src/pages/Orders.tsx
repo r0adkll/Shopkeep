@@ -42,6 +42,7 @@ type Order = {
   flagShort: boolean;
   flagAdhoc: boolean;
   platformStatus: string;
+  archived: boolean;
   lines: OrderLine[];
 };
 
@@ -132,9 +133,10 @@ export function OrdersPage() {
     queryFn: () => jsonFetch<Lane[]>("/api/v1/lanes"),
     enabled: !!me.data,
   });
+  const [showArchived, setShowArchived] = useState(false);
   const orders = useQuery({
-    queryKey: ["orders"],
-    queryFn: () => jsonFetch<Order[]>("/api/v1/orders"),
+    queryKey: ["orders", showArchived],
+    queryFn: () => jsonFetch<Order[]>(`/api/v1/orders?includeArchived=${showArchived}`),
     enabled: !!me.data,
     refetchInterval: 30_000,
   });
@@ -190,8 +192,12 @@ export function OrdersPage() {
       <header className="mb-5 flex flex-wrap items-center gap-5 border-b border-line py-5">
         <Wordmark />
         <NavTabs active="Orders" />
+        <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}
+          className={`ml-auto rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
+          archived
+        </button>
         {isAdmin && (
-          <span className="ml-auto flex items-center gap-2.5">
+          <span className="flex items-center gap-2.5">
             {rematchMsg && <span className="text-xs text-ink2">{rematchMsg}</span>}
             <button
               onClick={() => rematch.mutate()}
@@ -211,7 +217,7 @@ export function OrdersPage() {
             </button>
           </span>
         )}
-        <span className={`${isAdmin ? "" : "ml-auto "}text-sm text-ink2`}>{me.data.displayName}</span>
+        <span className="text-sm text-ink2">{me.data.displayName}</span>
       </header>
 
       {/* Summary strip — segmented card, no sub-captions (design system) */}
@@ -958,6 +964,11 @@ function OrderCard(props: {
               ✎ {p.formatted_value}
             </span>
           ))}
+          {o.archived && (
+            <span className="rounded-full bg-line/60 px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider text-mut">
+              ARCHIVED
+            </span>
+          )}
           {o.flagShort && (
             <span className="rounded-full bg-crit/10 px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider text-crit">
               SHORT
