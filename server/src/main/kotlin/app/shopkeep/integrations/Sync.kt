@@ -92,6 +92,22 @@ object OrderLinesTable : Table("order_lines") {
     override val primaryKey = PrimaryKey(id)
 }
 
+/** Mirror of Etsy's payment-account ledger — real money events (labels,
+ *  fees, ads). shipping_transaction entries reference receipts directly;
+ *  shipping_labels carry actual postage but join to nothing (vault: Etsy
+ *  Integration) so they feed shop-level spend, not per-order lines. */
+object PlatformLedgerTable : Table("platform_ledger_entries") {
+    val entryId = long("entry_id")
+    val connectionId = long("connection_id")
+    val ledgerType = text("ledger_type")
+    val referenceType = text("reference_type").nullable()
+    val referenceId = text("reference_id").nullable()
+    val amountMinor = long("amount_minor")
+    val currency = text("currency")
+    val createdAt = timestampWithTimeZone("created_at").nullable()
+    override val primaryKey = PrimaryKey(entryId)
+}
+
 /** Remembered manual matches: platform listing id -> canonical listing. */
 object ListingMatchesTable : Table("listing_matches") {
     val platformListingId = text("platform_listing_id")
@@ -193,6 +209,8 @@ data class OrderNoteView(
 @Serializable
 data class OrderDetail(
     val order: OrderView,
+    val shipFeesMinor: Long? = null, // exact: receipt-linked shipping_transaction ledger entries
+    val shipEstimateMinor: Long? = null, // estimate: packaging profile's expected postage
     val shipName: String?,
     val shipLine1: String?,
     val shipLine2: String?,
@@ -405,6 +423,8 @@ class SyncService(
             }
         }
         connections.setCursor(connectionId, OffsetDateTime.now())
+        // Money-side mirror rides every poll (labels, fees, ads — Stats fuel).
+        runCatching { ingestLedger(connectionId) }
         return SyncResult(receipts.results.size, created, matched, unmatched)
     }
 
@@ -443,6 +463,33 @@ class SyncService(
             newStatus !in deadStatuses
         ) {
             lanes.move(orderId, lanes.doneLaneId(), null)
+        }
+    }
+
+    /** Ledger ingestion: idempotent by entry_id; resumes from the newest
+     *  stored entry (first run backfills one 31-day window, Etsy's max). */
+    suspend fun ingestLedger(connectionId: Long) {
+        val now = Instant.now().epochSecond
+        val newest = dbQuery {
+            PlatformLedgerTable.selectAll()
+                .where { PlatformLedgerTable.connectionId eq connectionId }
+                .maxOfOrNull { it[PlatformLedgerTable.createdAt]?.toEpochSecond() ?: 0L }
+        } ?: 0L
+        val min = maxOf(newest - 3600, now - 2_678_000)
+        val entries = connections.fetchLedgerEntries(connectionId, min, now) ?: return
+        dbQuery {
+            for (e in entries) {
+                PlatformLedgerTable.insertIgnore {
+                    it[entryId] = e.entryId
+                    it[PlatformLedgerTable.connectionId] = connectionId
+                    it[ledgerType] = e.ledgerType
+                    it[referenceType] = e.referenceType
+                    it[referenceId] = e.referenceId?.toString()
+                    it[amountMinor] = e.amount
+                    it[currency] = e.currency
+                    it[createdAt] = OffsetDateTime.ofInstant(Instant.ofEpochSecond(e.createdTimestamp), ZoneOffset.UTC)
+                }
+            }
         }
     }
 
@@ -983,8 +1030,30 @@ class SyncService(
                 }
         }
 
+        // Shipping cost side (vault: Etsy Integration): receipt-linked
+        // shipping_transaction ledger entries are exact; the label cost is an
+        // estimate from the packaging profile until labels join to orders.
+        val shipFees = dbQuery {
+            -PlatformLedgerTable.selectAll()
+                .where { PlatformLedgerTable.ledgerType eq "shipping_transaction" }
+                .andWhere { PlatformLedgerTable.referenceId eq o[OrdersTable.platformOrderId] }
+                .sumOf { it[PlatformLedgerTable.amountMinor] } // ledger charges are negative; costs read positive
+        }.takeIf { it != 0L }
+        val shipEstimate = summary.lines
+            .mapNotNull { it.matchedListingId }.distinct()
+            .mapNotNull { lid -> listings.get(lid)?.input?.packagingProfileId }.distinct()
+            .mapNotNull { pid ->
+                dbQuery {
+                    app.shopkeep.listings.PackagingProfilesTable.selectAll()
+                        .where { app.shopkeep.listings.PackagingProfilesTable.id eq pid }.singleOrNull()
+                        ?.get(app.shopkeep.listings.PackagingProfilesTable.shipCostEstimateMinor)
+                }
+            }.maxOrNull()
+
         return OrderDetail(
             order = summary,
+            shipFeesMinor = shipFees,
+            shipEstimateMinor = shipEstimate,
             shipName = o[OrdersTable.shipName],
             shipLine1 = o[OrdersTable.shipLine1],
             shipLine2 = o[OrdersTable.shipLine2],

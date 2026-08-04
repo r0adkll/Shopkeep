@@ -199,6 +199,20 @@ data class EtsyReceipt(
 data class EtsyReceipts(val count: Int = 0, val results: List<EtsyReceipt> = emptyList())
 
 @Serializable
+data class EtsyLedgerEntry(
+    @SerialName("entry_id") val entryId: Long = 0,
+    val amount: Long = 0, // minor units, negative = charge
+    val currency: String = "USD",
+    @SerialName("ledger_type") val ledgerType: String = "",
+    @SerialName("reference_type") val referenceType: String? = null,
+    @SerialName("reference_id") val referenceId: Long? = null, // numeric object id on the wire
+    @SerialName("created_timestamp") val createdTimestamp: Long = 0,
+)
+
+@Serializable
+data class EtsyLedgerEntries(val count: Int = 0, val results: List<EtsyLedgerEntry> = emptyList())
+
+@Serializable
 data class EtsyPayment(@SerialName("amount_fees") val amountFees: EtsyMoney = EtsyMoney())
 
 @Serializable
@@ -546,6 +560,25 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         }
         return if (resp.status.isSuccess()) null
         else "Etsy ${resp.status.value} on $path: ${resp.bodyAsText().take(300)}"
+    }
+
+    /** Payment-account ledger page (31-day max window per Etsy). */
+    suspend fun fetchLedgerEntries(connectionId: Long, minEpoch: Long, maxEpoch: Long): List<EtsyLedgerEntry>? {
+        val c = creds(connectionId) ?: return null
+        val all = mutableListOf<EtsyLedgerEntry>()
+        var offset = 0
+        while (offset < 500) {
+            val page = runCatching {
+                etsyGet<EtsyLedgerEntries>(
+                    "$apiBase/shops/${c.shopId}/payment-account/ledger-entries?min_created=$minEpoch&max_created=$maxEpoch&limit=100&offset=$offset",
+                    c.keystring, c.secret, c.access,
+                ).results
+            }.getOrNull() ?: return if (offset == 0) null else all
+            all += page
+            if (page.size < 100) break
+            offset += 100
+        }
+        return all
     }
 
     /** One receipt with transactions — rematch backfill for early-ingest lines. */

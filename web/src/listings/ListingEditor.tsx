@@ -1285,18 +1285,29 @@ function ProfileEditor({
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
+  const [shipEst, setShipEst] = useState("");
   const [bands, setBands] = useState<Band[]>([
     { minQty: 1, maxQty: 1, kind: "stocked", materials: [] },
     { minQty: 2, maxQty: null, kind: "adhoc", materials: [] },
   ]);
   const save = useMutation({
-    mutationFn: () => listingsApi.createProfile(name, bands),
+    mutationFn: () => listingsApi.createProfile(name, bands, shipEst ? Math.round(parseFloat(shipEst) * 100) : null),
     onSuccess: (p) => onSaved(p.id),
   });
   const patchBand = (i: number, patch: Partial<Band>) => setBands(bands.map((b, j) => (j === i ? { ...b, ...patch } : b)));
   return (
     <div className="mt-2 rounded-xl border-2 border-accent bg-panel p-4 shadow-sm">
       <Field label="Profile name" value={name} onChange={setName} autoFocus />
+      <label className="mt-2 flex items-center gap-2 text-xs text-ink2">
+        Expected postage $
+        <input
+          value={shipEst}
+          onChange={(e) => setShipEst(e.target.value)}
+          placeholder="6.98"
+          className="w-20 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
+        />
+        <span className="text-[10.5px] text-mut">feeds the order cost breakdown as “Shipping label EST” — Etsy's API has no per-order label cost</span>
+      </label>
       {bands.map((b, i) => (
         <div key={i} className="mt-2 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-[10px] font-extrabold tracking-widest text-accent">QTY</span>

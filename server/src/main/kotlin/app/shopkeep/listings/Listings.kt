@@ -26,6 +26,7 @@ import java.time.OffsetDateTime
 object PackagingProfilesTable : Table("packaging_profiles") {
     val id = long("id").autoIncrement()
     val name = text("name")
+    val shipCostEstimateMinor = long("ship_cost_estimate_minor").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -270,10 +271,10 @@ data class Listing(
 data class BandInput(val minQty: Int, val maxQty: Int? = null, val kind: String, val materials: List<ExtraInput> = emptyList())
 
 @Serializable
-data class PackagingProfileInput(val name: String, val bands: List<BandInput>)
+data class PackagingProfileInput(val name: String, val bands: List<BandInput>, val shipCostEstimateMinor: Long? = null)
 
 @Serializable
-data class PackagingProfile(val id: Long, val name: String, val bands: List<BandInput>, val listingCount: Int)
+data class PackagingProfile(val id: Long, val name: String, val bands: List<BandInput>, val listingCount: Int, val shipCostEstimateMinor: Long? = null)
 
 @Serializable
 data class PackagingResolution(
@@ -289,10 +290,10 @@ class ListingRepository(private val products: ProductRepository) {
     /* ---------- packaging profiles (D14) ---------- */
 
     suspend fun listProfiles(): List<PackagingProfile> = dbQuery {
-        PackagingProfilesTable.selectAll().map { row -> readProfile(row[PackagingProfilesTable.id], row[PackagingProfilesTable.name]) }
+        PackagingProfilesTable.selectAll().map { row -> readProfile(row[PackagingProfilesTable.id], row[PackagingProfilesTable.name], row[PackagingProfilesTable.shipCostEstimateMinor]) }
     }
 
-    private fun readProfile(id: Long, name: String): PackagingProfile {
+    private fun readProfile(id: Long, name: String, shipEstimate: Long? = null): PackagingProfile {
         val bands = PackagingBandsTable.selectAll().where { PackagingBandsTable.profileId eq id }
             .orderBy(PackagingBandsTable.position).map { b ->
                 val mats = PackagingBandMaterialsTable.selectAll()
@@ -301,14 +302,20 @@ class ListingRepository(private val products: ProductRepository) {
                 BandInput(b[PackagingBandsTable.minQty], b[PackagingBandsTable.maxQty], b[PackagingBandsTable.kind], mats)
             }
         val count = ListingsTable.selectAll().where { ListingsTable.packagingProfileId eq id }.count().toInt()
-        return PackagingProfile(id, name, bands, count)
+        return PackagingProfile(id, name, bands, count, shipEstimate)
     }
 
     suspend fun saveProfile(id: Long?, input: PackagingProfileInput): Long = dbQuery {
         val profileId = if (id == null) {
-            PackagingProfilesTable.insert { it[name] = input.name } get PackagingProfilesTable.id
+            PackagingProfilesTable.insert {
+                it[name] = input.name
+                it[shipCostEstimateMinor] = input.shipCostEstimateMinor
+            } get PackagingProfilesTable.id
         } else {
-            PackagingProfilesTable.update({ PackagingProfilesTable.id eq id }) { it[name] = input.name }
+            PackagingProfilesTable.update({ PackagingProfilesTable.id eq id }) {
+                it[name] = input.name
+                it[shipCostEstimateMinor] = input.shipCostEstimateMinor
+            }
             PackagingBandsTable.deleteWhere { profileId eq id }
             id
         }

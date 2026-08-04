@@ -74,7 +74,7 @@ export type Listing = {
 };
 
 export type Band = { minQty: number; maxQty?: number | null; kind: "stocked" | "adhoc"; materials: Extra[] };
-export type PackagingProfile = { id: number; name: string; bands: Band[]; listingCount: number };
+export type PackagingProfile = { id: number; name: string; bands: Band[]; listingCount: number; shipCostEstimateMinor?: number | null };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/v1${path}`, {
@@ -114,8 +114,8 @@ export const listingsApi = {
   archive: (id: number, archived: boolean) =>
     req<Listing>(`/listings/${id}/archive`, { method: "POST", body: JSON.stringify({ archived }) }),
   profiles: () => req<PackagingProfile[]>("/packaging-profiles"),
-  createProfile: (name: string, bands: Band[]) =>
-    req<PackagingProfile>("/packaging-profiles", { method: "POST", body: JSON.stringify({ name, bands }) }),
-  updateProfile: (id: number, name: string, bands: Band[]) =>
-    req<PackagingProfile>(`/packaging-profiles/${id}`, { method: "PUT", body: JSON.stringify({ name, bands }) }),
+  createProfile: (name: string, bands: Band[], shipCostEstimateMinor?: number | null) =>
+    req<PackagingProfile>("/packaging-profiles", { method: "POST", body: JSON.stringify({ name, bands, shipCostEstimateMinor }) }),
+  updateProfile: (id: number, name: string, bands: Band[], shipCostEstimateMinor?: number | null) =>
+    req<PackagingProfile>(`/packaging-profiles/${id}`, { method: "PUT", body: JSON.stringify({ name, bands, shipCostEstimateMinor }) }),
 };

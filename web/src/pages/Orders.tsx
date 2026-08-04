@@ -61,6 +61,8 @@ type OrderEvent = { from: string | null; to: string; author: string | null; at: 
 type OrderNote = { id: number; author: string; body: string; documentIds: number[]; at: string | null };
 type OrderDetail = {
   order: Order;
+  shipFeesMinor: number | null;
+  shipEstimateMinor: number | null;
   shipName: string | null;
   shipLine1: string | null;
   shipLine2: string | null;
@@ -364,7 +366,7 @@ function OrderDetailPanel(props: {
   const revenue = o && d ? o.totalMinor - (d.taxMinor ?? 0) : 0;
   const net =
     d?.materialsCostMinor != null
-      ? revenue - (d.feesMinor ?? 0) - d.materialsCostMinor - (d.laborMinor ?? 0)
+      ? revenue - (d.feesMinor ?? 0) - (d.shipFeesMinor ?? 0) - d.materialsCostMinor - (d.laborMinor ?? 0) - (d.shipEstimateMinor ?? 0)
       : null;
 
   return (
@@ -591,8 +593,19 @@ function OrderDetailPanel(props: {
                         {d.feesMinor != null && (
                           <tr><td className="border-t border-dashed border-line pt-1.5 text-ink2" title="amount_fees from the Etsy payments API">Etsy fees</td><td className="border-t border-dashed border-line pt-1.5 text-right font-mono text-ink2">−{money(d.feesMinor)}</td></tr>
                         )}
+                        {d.shipFeesMinor != null && (
+                          <tr><td className="py-0.5 text-ink2" title="receipt-linked shipping_transaction entries from Etsy's payment ledger — exact">Shipping fees</td><td className="py-0.5 text-right font-mono text-ink2">−{money(d.shipFeesMinor)}</td></tr>
+                        )}
                         <tr><td className="py-0.5 text-ink2" title="this order's reserved bill of materials × material costs">Materials</td><td className="py-0.5 text-right font-mono text-ink2">−{money(d.materialsCostMinor)}</td></tr>
                         <tr><td className="py-0.5 text-ink2" title="per-product labor × global labor rate">Labor</td><td className="py-0.5 text-right font-mono text-ink2">−{money(d.laborMinor ?? 0)}</td></tr>
+                        {d.shipEstimateMinor != null && (
+                          <tr>
+                            <td className="py-0.5 text-ink2" title="expected postage from the packaging profile — Etsy's API exposes actual label costs only shop-wide, never per order">
+                              Shipping label <span className="rounded bg-warn/10 px-1 text-[8.5px] font-extrabold tracking-wider text-warn">EST</span>
+                            </td>
+                            <td className="py-0.5 text-right font-mono text-ink2">−{money(d.shipEstimateMinor)}</td>
+                          </tr>
+                        )}
                         {net != null && (
                           <tr className="border-t border-line/70 font-bold text-good">
                             <td className="pt-1.5">Net profit {revenue > 0 && <span className="text-[10px] font-semibold text-mut">{Math.round((net / revenue) * 100)}% margin</span>}</td>
