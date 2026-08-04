@@ -128,7 +128,9 @@ data class PersonalizationQuestion(
     val instructions: String? = null,
     val required: Boolean = false,
     val maxChars: Int? = null,
-    val options: List<String> = emptyList(),
+    val options: List<String> = emptyList(), // dropdown choices, or file labels (labeled upload)
+    val maxFiles: Int? = null, // file questions only
+    val addOnPriceMinor: Long? = null, // Etsy native fee — optional text questions only
 )
 
 @Serializable
@@ -149,20 +151,6 @@ fun ListingInput.pushShapeActive(archivedIds: Set<Long>) =
     copy(axes = axes.map { ax -> ax.copy(values = ax.values.filter { it.materialId == null || it.materialId !in archivedIds }) })
         .pushShape()
 
-/* Etsy has exactly one native personalization field (on/off, required,
- * char max, instructions); our multi-question model compiles into its
- * instructions text. Truncated to Etsy's 255-char instruction limit at
- * compile time so want==pushed stays stable (no perpetual pending). */
-fun Personalization.etsyInstructions(): String {
-    val text = questions.mapIndexed { i, q ->
-        val prefix = if (questions.size > 1) "${i + 1}) " else ""
-        val opts = if (q.type == "dropdown" && q.options.isNotEmpty()) " (choose: ${q.options.joinToString(" / ")})" else ""
-        val extra = q.instructions?.takeIf { it.isNotBlank() }?.let { " — $it" } ?: ""
-        "$prefix${q.questionText}$opts$extra"
-    }.joinToString("\n")
-    return if (text.length <= 255) text else text.take(254) + "…"
-}
-
 fun ListingInput.pushShape() = app.shopkeep.integrations.PushSnapshot(
     title = title,
     description = description,
@@ -173,10 +161,36 @@ fun ListingInput.pushShape() = app.shopkeep.integrations.PushSnapshot(
     variations = axes.associate { ax ->
         ax.displayName to ax.values.filter { it.offered }.map { v -> v.displayLabel ?: v.platformValue ?: "?" }
     },
-    personalizable = personalization?.questions?.isNotEmpty() == true,
-    persRequired = personalization?.questions?.any { it.required } == true,
-    persCharMax = personalization?.questions?.mapNotNull { it.maxChars }?.maxOrNull(),
-    persInstructions = personalization?.takeIf { it.questions.isNotEmpty() }?.etsyInstructions() ?: "",
+    /* Etsy's native personalization-questions API maps ~1:1 onto our model.
+     * Normalization enforces Etsy's constraints at compile time so pushed ==
+     * desired stays stable: text ≤45, dropdown labels ≤20, no instructions on
+     * dropdowns, char max only on text (always sent so Etsy can't default it),
+     * file count pinned to label count, fee only on optional text questions. */
+    persQuestions = personalization?.questions.orEmpty().filter { it.questionText.isNotBlank() }.map { q ->
+        val type = when (q.type) {
+            "dropdown" -> "dropdown"
+            "file" -> if (q.options.isNotEmpty()) "labeled_upload" else "unlabeled_upload"
+            else -> "text_input"
+        }
+        app.shopkeep.integrations.PersQ(
+            text = q.questionText.take(45),
+            type = type,
+            instructions = q.instructions?.takeIf { it.isNotBlank() && type != "dropdown" },
+            required = q.required,
+            maxChars = if (type == "text_input") (q.maxChars ?: 256) else null,
+            maxFiles = when (type) {
+                "labeled_upload" -> q.options.size
+                "unlabeled_upload" -> q.maxFiles ?: 1
+                else -> null
+            },
+            options = when (type) {
+                "dropdown" -> q.options.map { it.take(20) }
+                "labeled_upload" -> q.options.map { it.take(45) }
+                else -> emptyList()
+            },
+            addOnMinor = q.addOnPriceMinor?.takeIf { type == "text_input" && !q.required && it > 0 },
+        )
+    },
 )
 
 @Serializable

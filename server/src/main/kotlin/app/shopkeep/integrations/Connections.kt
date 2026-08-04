@@ -115,6 +115,30 @@ data class EtsyListingImage(
 )
 
 @Serializable
+data class EtsyPersonalizationOption(
+    @SerialName("option_id") val optionId: Long? = null,
+    val label: String = "",
+)
+
+@Serializable
+data class EtsyPersonalizationQuestion(
+    @SerialName("question_id") val questionId: Long? = null,
+    @SerialName("question_text") val questionText: String = "",
+    val instructions: String? = null,
+    @SerialName("question_type") val questionType: String = "text_input", // text_input | dropdown | unlabeled_upload | labeled_upload
+    val required: Boolean = false,
+    @SerialName("max_allowed_characters") val maxAllowedCharacters: Int? = null,
+    @SerialName("max_allowed_files") val maxAllowedFiles: Int? = null,
+    @SerialName("add_on_price") val addOnPrice: EtsyMoney? = null,
+    val options: List<EtsyPersonalizationOption>? = null,
+)
+
+@Serializable
+data class EtsyPersonalization(
+    @SerialName("personalization_questions") val personalizationQuestions: List<EtsyPersonalizationQuestion> = emptyList(),
+)
+
+@Serializable
 data class EtsyShopListing(
     @SerialName("listing_id") val listingId: Long = 0,
     val title: String = "",
@@ -124,6 +148,7 @@ data class EtsyShopListing(
     val tags: List<String> = emptyList(),
     val inventory: EtsyInventory? = null,
     val images: List<EtsyListingImage>? = null,
+    val personalization: EtsyPersonalization? = null, // native questions (includes=Personalization)
     @SerialName("is_personalizable") val isPersonalizable: Boolean = false,
     @SerialName("personalization_is_required") val personalizationIsRequired: Boolean = false,
     @SerialName("personalization_char_count_max") val personalizationCharCountMax: Int? = null,
@@ -464,7 +489,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         return listOf("active", "draft").flatMap { state ->
             runCatching {
                 etsyGet<EtsyShopListings>(
-                    "$apiBase/shops/$shopId/listings?state=$state&limit=100&includes=Inventory",
+                    "$apiBase/shops/$shopId/listings?state=$state&limit=100&includes=Inventory,Personalization",
                     keystring, secret, access,
                 ).results
             }.getOrElse { emptyList() }
@@ -490,7 +515,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
     suspend fun fetchListing(connectionId: Long, etsyListingId: String): EtsyShopListing? {
         val c = creds(connectionId) ?: return null
         return runCatching {
-            val listing = etsyGet<EtsyShopListing>("$apiBase/listings/$etsyListingId?includes=Images", c.keystring, c.secret, c.access)
+            val listing = etsyGet<EtsyShopListing>("$apiBase/listings/$etsyListingId?includes=Images,Personalization", c.keystring, c.secret, c.access)
             val inv = runCatching {
                 etsyGet<EtsyInventory>("$apiBase/listings/$etsyListingId/inventory", c.keystring, c.secret, c.access)
             }.getOrNull()

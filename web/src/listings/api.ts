@@ -6,7 +6,9 @@ export type PersonalizationQuestion = {
   instructions?: string | null;
   required: boolean;
   maxChars?: number | null;
-  options: string[];
+  options: string[]; // dropdown choices, or file labels (labeled upload)
+  maxFiles?: number | null; // file questions only
+  addOnPriceMinor?: number | null; // Etsy native fee — optional text questions only
 };
 
 export type Personalization = {

@@ -159,7 +159,7 @@ export function PushReview({ listingId, onClose, onPushed }: { listingId: number
                         {c.note && <span className="text-[11px] text-warn">⚠ {c.note}</span>}
                       </div>
                       {isOpen && <div className="px-2 pb-2"><WordDiff oldText={c.oldValue ?? ""} newText={c.newValue ?? ""} /></div>}
-                      {c.kind === "drift" && PULLABLE.has(c.field) && (
+                      {c.kind === "drift" && (PULLABLE.has(c.field) || c.field.startsWith("Personalization")) && (
                         <div className="px-2 pb-1 text-[11px] text-ink2">
                           Shopkeep wins on push · escape hatch:{" "}
                           <button onClick={() => pull(c.field)} disabled={busy} className="text-accent underline disabled:opacity-50">

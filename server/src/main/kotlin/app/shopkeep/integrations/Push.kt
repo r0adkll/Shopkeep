@@ -43,11 +43,51 @@ data class PushSnapshot(
     val variations: Map<String, List<String>> = emptyMap(),
     val photoDocumentIds: List<Long> = emptyList(), // legacy: uploaded, ids unknown
     val photoMap: List<PhotoLink> = emptyList(), // local doc <-> etsy image (ordered)
+    // legacy single-field projection — kept only so stored snapshots deserialize
     val personalizable: Boolean = false,
     val persRequired: Boolean = false,
     val persCharMax: Int? = null,
     val persInstructions: String = "",
+    val persQuestions: List<PersQ> = emptyList(), // native questions normal form
 )
+
+/** Comparable normal form of one Etsy personalization question. */
+@Serializable
+data class PersQ(
+    val text: String = "",
+    val type: String = "text_input", // text_input | dropdown | unlabeled_upload | labeled_upload
+    val instructions: String? = null,
+    val required: Boolean = false,
+    val maxChars: Int? = null,
+    val maxFiles: Int? = null,
+    val options: List<String> = emptyList(),
+    val addOnMinor: Long? = null,
+)
+
+/** Etsy returns text HTML-entity-escaped; decode so round-trips diff clean. */
+fun htmlDecode(s: String): String = s
+    .replace("&quot;", "\"").replace("&#39;", "'")
+    .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+
+fun EtsyPersonalization?.toCanonicalPersonalization(): app.shopkeep.listings.Personalization? {
+    val qs = this?.personalizationQuestions?.takeIf { it.isNotEmpty() } ?: return null
+    return app.shopkeep.listings.Personalization(questions = qs.map { q ->
+        app.shopkeep.listings.PersonalizationQuestion(
+            type = when (q.questionType) {
+                "dropdown" -> "dropdown"
+                "unlabeled_upload", "labeled_upload" -> "file"
+                else -> "text"
+            },
+            questionText = htmlDecode(q.questionText),
+            instructions = q.instructions?.takeIf { it.isNotBlank() }?.let(::htmlDecode),
+            required = q.required,
+            maxChars = q.maxAllowedCharacters,
+            maxFiles = q.maxAllowedFiles,
+            options = q.options.orEmpty().map { htmlDecode(it.label) },
+            addOnPriceMinor = q.addOnPrice?.minor?.takeIf { it > 0 },
+        )
+    })
+}
 
 @Serializable
 data class PhotoLink(val docId: Long, val etsyImageId: Long)
@@ -135,20 +175,29 @@ class PushService(
         val price = e.inventory?.products?.firstOrNull()?.offerings?.firstOrNull()?.price?.minor ?: 0
         return PushSnapshot(
             e.title, e.description, e.tags, price, e.quantity, e.state, axes,
-            personalizable = e.isPersonalizable,
-            persRequired = e.personalizationIsRequired,
-            persCharMax = e.personalizationCharCountMax,
-            persInstructions = e.personalizationInstructions ?: "",
+            persQuestions = e.personalization?.personalizationQuestions.orEmpty().map { q ->
+                PersQ(
+                    text = htmlDecode(q.questionText),
+                    type = q.questionType,
+                    instructions = q.instructions?.takeIf { it.isNotBlank() }?.let(::htmlDecode),
+                    required = q.required,
+                    maxChars = q.maxAllowedCharacters,
+                    maxFiles = q.maxAllowedFiles,
+                    options = q.options.orEmpty().map { htmlDecode(it.label) },
+                    addOnMinor = q.addOnPrice?.minor?.takeIf { it > 0 },
+                )
+            },
         )
     }
 
-    /** One review row for the whole personalization tuple — Etsy treats it
-     *  as a unit, so we diff and pull it as a unit. */
-    private fun persSummary(s: PushSnapshot): String {
-        if (!s.personalizable) return "off"
-        val bits = mutableListOf("on", if (s.persRequired) "required" else "optional")
-        s.persCharMax?.let { bits += "max $it chars" }
-        if (s.persInstructions.isNotBlank()) bits += "“${s.persInstructions}”"
+    private fun qSummary(q: PersQ): String {
+        val bits = mutableListOf("“${q.text}”", q.type.removeSuffix("_input").replace("_", " "),
+            if (q.required) "required" else "optional")
+        q.maxChars?.let { bits += "max $it chars" }
+        q.maxFiles?.let { bits += "max $it files" }
+        if (q.options.isNotEmpty()) bits += "[${q.options.joinToString(" / ")}]"
+        q.addOnMinor?.let { bits += "+$" + "%.2f".format(it / 100.0) }
+        q.instructions?.let { bits += "— $it" }
         return bits.joinToString(" · ")
     }
 
@@ -178,7 +227,20 @@ class PushService(
             changes += PushChange("details", "Tags", have.tags.joinToString(", "), want.tags.joinToString(", "),
                 if (baseline != null && have.tags.toSet() != baseline.tags.toSet()) "drift" else "changed")
         }
-        field("details", "Personalization", persSummary(have), persSummary(want), baseline?.let { persSummary(it) })
+        // Personalization: one row per question slot (Etsy caps these low, so
+        // index-wise comparison reads naturally in the review dialog).
+        val nQ = maxOf(want.persQuestions.size, have.persQuestions.size)
+        for (qi in 0 until nQ) {
+            val oldS = have.persQuestions.getOrNull(qi)?.let(::qSummary)
+            val newS = want.persQuestions.getOrNull(qi)?.let(::qSummary)
+            if (oldS == newS) continue
+            val baseS = baseline?.persQuestions?.getOrNull(qi)?.let(::qSummary)
+            val drift = baseline != null && oldS != baseS
+            val label = if (nQ > 1) "Personalization Q${qi + 1}" else "Personalization"
+            val kind = if (drift) "drift" else if (oldS == null) "added" else if (newS == null) "removed" else "changed"
+            changes += PushChange("details", label, oldS, newS, kind,
+                if (kind == "removed") "buyers will no longer see this question" else null)
+        }
         for ((axis, wantVals) in want.variations) {
             val haveVals = have.variations.entries.firstOrNull { it.key.equals(axis, true) }?.value ?: emptyList()
             wantVals.filter { wv -> haveVals.none { it.equals(wv, true) } }.forEach {
@@ -272,7 +334,8 @@ class PushService(
         // 1) inventory: cartesian products matrix with SKUs per mode.
         // Etsy requires readiness_state_id on every offering — carry the
         // listing's current one (processing profile readiness state).
-        val readinessStateId = connections.fetchListing(connId, etsyId)
+        val current0 = connections.fetchListing(connId, etsyId)
+        val readinessStateId = current0
             ?.inventory?.products?.firstOrNull()?.offerings?.firstOrNull()?.readinessStateId
         val dead = archivedIds()
         val axes = l.input.axes.map { ax -> ax to ax.values.filter { it.offered && (it.materialId == null || it.materialId !in dead) } }
@@ -333,15 +396,50 @@ class PushService(
             put("title", want.title)
             put("description", want.description)
             if (want.tags.isNotEmpty()) put("tags", want.tags.joinToString(","))
-            put("is_personalizable", want.personalizable)
-            if (want.personalizable) {
-                put("personalization_is_required", want.persRequired)
-                want.persCharMax?.let { put("personalization_char_count_max", it) }
-                put("personalization_instructions", want.persInstructions)
-            }
         }
         connections.etsyWriteForm(connId, "/shops/$shopId/listings/$etsyId", details)?.let {
             return fail(listingId, "details: $it")
+        }
+
+        // 2b) personalization via the native questions API. POST replaces the
+        // whole set; carry question/option ids by index so Etsy updates rather
+        // than recreates. Empty desired set -> DELETE turns it off.
+        val haveQs = current0?.let { etsyShape(it).persQuestions } ?: emptyList()
+        if (want.persQuestions != haveQs) {
+            if (want.persQuestions.isEmpty()) {
+                connections.etsyWrite(connId, "DELETE", "/shops/$shopId/listings/$etsyId/personalization", "")?.let {
+                    return fail(listingId, "personalization: $it")
+                }
+            } else {
+                val rawQs = current0?.personalization?.personalizationQuestions ?: emptyList()
+                val body = buildJsonObject {
+                    putJsonArray("personalization_questions") {
+                        want.persQuestions.forEachIndexed { qi, q ->
+                            add(buildJsonObject {
+                                rawQs.getOrNull(qi)?.questionId?.let { put("question_id", it) }
+                                put("question_text", q.text)
+                                q.instructions?.let { put("instructions", it) }
+                                put("question_type", q.type)
+                                put("required", q.required)
+                                q.maxChars?.let { put("max_allowed_characters", it) }
+                                q.maxFiles?.let { put("max_allowed_files", it) }
+                                q.addOnMinor?.let { put("add_on_price", it / 100.0) }
+                                if (q.options.isNotEmpty()) putJsonArray("options") {
+                                    q.options.forEachIndexed { oi, label ->
+                                        add(buildJsonObject {
+                                            rawQs.getOrNull(qi)?.options?.getOrNull(oi)?.optionId?.let { put("option_id", it) }
+                                            put("label", label)
+                                        })
+                                    }
+                                }
+                            })
+                        }
+                    }
+                }
+                connections.etsyWrite(connId, "POST", "/shops/$shopId/listings/$etsyId/personalization", body.toString())?.let {
+                    return fail(listingId, "personalization: $it")
+                }
+            }
         }
 
         // 3) photos: full sync — delete removed, upload new at rank, re-rank moved
@@ -431,23 +529,17 @@ class PushService(
         val connId = connectionId() ?: return false
         val e = connections.fetchListing(connId, etsyId) ?: return false
         val cur = etsyShape(e)
-        val input = when (fieldName.lowercase()) {
+        // "Personalization Q2"-style rows all pull the whole question set
+        val input = when (fieldName.lowercase().let { if (it.startsWith("personalization")) "personalization" else it }) {
             "title" -> l.input.copy(title = cur.title)
             "description" -> l.input.copy(description = cur.description)
             "price" -> l.input.copy(basePriceMinor = cur.priceMinor)
             "quantity" -> l.input.copy(quantity = cur.quantity)
             "tags" -> l.input.copy(tags = cur.tags)
             "state" -> l.input.copy(state = if (cur.state in setOf("draft", "active", "inactive")) cur.state else "inactive") // sold_out/expired have no canonical twin
-            // Etsy's single field becomes one text question; compiling it back
-            // yields the same instructions, so the round-trip lands in_sync.
-            "personalization" -> l.input.copy(personalization = if (!e.isPersonalizable) null else app.shopkeep.listings.Personalization(
-                questions = listOf(app.shopkeep.listings.PersonalizationQuestion(
-                    type = "text",
-                    questionText = e.personalizationInstructions ?: "",
-                    required = e.personalizationIsRequired,
-                    maxChars = e.personalizationCharCountMax,
-                )),
-            ))
+            // Etsy's questions land as canonical questions; compiling back
+            // yields the same normal form, so the round-trip lands in_sync.
+            "personalization" -> l.input.copy(personalization = e.personalization.toCanonicalPersonalization())
             else -> return false
         }
         return listings.update(listingId, input)

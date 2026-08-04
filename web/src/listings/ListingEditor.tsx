@@ -1080,17 +1080,6 @@ function PersonalizationEditor({
 }) {
   const p = value ?? { questions: [], feeMinor: null, extraLaborMinutes: null };
   const setQ = (qs: PersonalizationQuestion[]) => onChange({ ...p, questions: qs });
-  // mirror of the server compile (Listings.kt etsyInstructions) — Etsy has one
-  // native instructions field; all questions flatten into it, capped at 255
-  const compiledFull = p.questions
-    .map((q, i) => {
-      const prefix = p.questions.length > 1 ? `${i + 1}) ` : "";
-      const opts = q.type === "dropdown" && q.options.length ? ` (choose: ${q.options.join(" / ")})` : "";
-      const extra = q.instructions?.trim() ? ` — ${q.instructions}` : "";
-      return `${prefix}${q.questionText}${opts}${extra}`;
-    })
-    .join("\n");
-  const compiled = compiledFull.length <= 255 ? compiledFull : compiledFull.slice(0, 254) + "…";
   return (
     <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
       {p.questions.map((q, i) => (
@@ -1122,14 +1111,44 @@ function PersonalizationEditor({
             <input
               value={q.options.join(", ")}
               onChange={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x)))}
-              placeholder="options, comma-separated"
-              className="w-52 rounded border border-line bg-panel2 px-2 py-1 text-xs"
+              placeholder="options, comma-separated (≤20 chars each)"
+              className="w-56 rounded border border-line bg-panel2 px-2 py-1 text-xs"
             />
+          )}
+          {q.type === "file" && (
+            <>
+              <input
+                value={q.options.length > 0 ? q.options.length : (q.maxFiles ?? "")}
+                disabled={q.options.length > 0}
+                onChange={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, maxFiles: parseInt(e.target.value) || null } : x)))}
+                placeholder="max files"
+                title={q.options.length > 0 ? "pinned to label count" : undefined}
+                className="w-20 rounded border border-line bg-panel2 px-2 py-1 text-xs disabled:opacity-60"
+              />
+              <input
+                value={q.options.join(", ")}
+                onChange={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) } : x)))}
+                placeholder="file labels, comma-separated (optional)"
+                className="w-56 rounded border border-line bg-panel2 px-2 py-1 text-xs"
+              />
+            </>
           )}
           <label className="flex items-center gap-1 text-xs text-ink2">
             <input type="checkbox" checked={q.required} onChange={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)))} className="accent-accent" />
             required
           </label>
+          {q.type === "text" && !q.required && (
+            <label className="flex items-center gap-1 text-xs text-ink2" title="Etsy add-on price — optional text questions only">
+              +$
+              <input
+                key={`fee-${i}-${q.addOnPriceMinor ?? "none"}`}
+                defaultValue={q.addOnPriceMinor != null ? (q.addOnPriceMinor / 100).toFixed(2) : ""}
+                onBlur={(e) => setQ(p.questions.map((x, j) => (j === i ? { ...x, addOnPriceMinor: e.target.value ? Math.round(parseFloat(e.target.value) * 100) : null } : x)))}
+                className="w-14 rounded border border-line bg-panel2 px-1.5 py-1 text-right font-mono text-xs"
+              />
+            </label>
+          )}
+          {q.questionText.length > 45 && <span className="text-[10px] font-semibold text-warn">{q.questionText.length}/45 — trimmed on push</span>}
           <button type="button" onClick={() => setQ(p.questions.filter((_, j) => j !== i))} className="text-xs text-mut hover:text-crit">remove</button>
         </div>
       ))}
@@ -1144,15 +1163,6 @@ function PersonalizationEditor({
       )}
       <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-dotted border-line pt-3 text-sm">
         <label className="flex items-center gap-2 text-xs text-ink2">
-          Fee $
-          <input
-            key={`fee-${p.feeMinor ?? "none"}`}
-            defaultValue={p.feeMinor != null ? (p.feeMinor / 100).toFixed(2) : ""}
-            onBlur={(e) => onChange({ ...p, feeMinor: e.target.value ? Math.round(parseFloat(e.target.value) * 100) : null })}
-            className="w-16 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-xs text-ink2">
           Extra labor
           <input
             value={p.extraLaborMinutes ?? ""}
@@ -1161,24 +1171,8 @@ function PersonalizationEditor({
           />
           min
         </label>
-        <span className="text-[11px] text-mut">fee compiles to a variation axis on push (no native price on Etsy personalization)</span>
+        <span className="text-[11px] text-mut">pushes natively to Etsy · +$ fee is Etsy's, allowed on optional text questions only · labor is Shopkeep-only</span>
       </div>
-      {p.questions.length > 0 && (
-        <div className="mt-3 rounded-lg border border-dashed border-line bg-panel2 px-3 py-2">
-          <div className="mb-1 text-[10px] font-extrabold tracking-widest text-mut uppercase">
-            Pushes to Etsy as{" "}
-            <span className={`font-mono tracking-normal ${compiledFull.length > 255 ? "text-warn" : ""}`}>
-              {compiledFull.length}/255
-            </span>
-            {compiledFull.length > 255 && <span className="ml-1.5 font-semibold tracking-normal text-warn normal-case">over Etsy's limit — truncated on push</span>}
-          </div>
-          <div className="text-xs whitespace-pre-wrap text-ink2">{compiled}</div>
-          <div className="mt-1 text-[10px] text-mut">
-            Etsy has one personalization box: {p.questions.some((q) => q.required) ? "required" : "optional"}
-            {p.questions.some((q) => q.maxChars) ? ` · buyer limit ${Math.max(...p.questions.map((q) => q.maxChars ?? 0))} chars` : ""}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
