@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { Download, ImageOff, Video } from "lucide-react";
+import { Download, ExternalLink, ImageOff, Video } from "lucide-react";
 import { Card, Wordmark, NavTabs } from "../ui";
 import { inventoryApi } from "../inventory/api";
 import { catalogApi, documentUrl, type Product } from "../catalog/api";
@@ -125,8 +125,10 @@ export function ListingsPage() {
               const [syncLabel, syncTone] = SYNC[l.syncState] ?? [l.syncState.replace("_", " ").toUpperCase(), "bg-panel2 text-mut"];
               const thumbId = l.input.imageDocumentIds[0];
               return (
-              <button key={l.id} type="button" onClick={() => open.mutate(l)}
-                className={`flex gap-3.5 rounded-xl border border-line bg-panel p-4 text-left shadow-sm hover:border-accent ${l.archived ? "opacity-70" : ""}`}>
+              // div, not button — the card holds a nested "open on Etsy" link
+              <div key={l.id} role="button" tabIndex={0} onClick={() => open.mutate(l)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open.mutate(l); } }}
+                className={`flex cursor-pointer gap-3.5 rounded-xl border border-line bg-panel p-4 text-left shadow-sm hover:border-accent ${l.archived ? "opacity-70" : ""}`}>
                 {thumbId != null ? (
                   <div className="relative flex-none self-start">
                     <img src={documentUrl(thumbId)} alt="" loading="lazy"
@@ -160,6 +162,17 @@ export function ListingsPage() {
                     </span>
                     {l.archived && (
                       <span className="rounded-full bg-line/60 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-mut">ARCHIVED</span>
+                    )}
+                    {l.etsyListingId && (
+                      <a
+                        href={`https://www.etsy.com/your/shops/me/listing-editor/edit/${l.etsyListingId}`}
+                        target="_blank" rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title="Open in Etsy's listing editor"
+                        className="ml-auto flex items-center gap-1 rounded-md border border-accent/40 px-2 py-0.5 text-[10.5px] font-semibold text-accent hover:bg-accent/5"
+                      >
+                        <ExternalLink size={11} /> Etsy
+                      </a>
                     )}
                   </div>
                   <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs">
