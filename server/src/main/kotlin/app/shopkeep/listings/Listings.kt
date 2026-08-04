@@ -504,8 +504,21 @@ class ListingRepository(private val products: ProductRepository) {
             val archivedIds = app.shopkeep.inventory.MaterialsTable.selectAll()
                 .where { app.shopkeep.inventory.MaterialsTable.archivedAt.isNotNull() }
                 .map { it[app.shopkeep.inventory.MaterialsTable.id] }.toSet()
+            // Field equality must ignore the snapshot's photo bookkeeping (the
+            // freshly-derived shape never has it); photos get their own check.
+            val fieldsPending = snap != null &&
+                snap.copy(photoDocumentIds = emptyList(), photoMap = emptyList()) != l.input.pushShapeActive(archivedIds)
+            val photosPending = snap != null && run {
+                val tracked = snap.photoMap.map { it.docId } + snap.photoDocumentIds
+                val localIds = l.input.imageDocumentIds
+                val mappedOrder = snap.photoMap.map { it.docId }.filter { it in localIds }
+                val keptOrder = localIds.filter { d -> snap.photoMap.any { it.docId == d } }
+                localIds.any { it !in tracked } ||
+                    snap.photoMap.any { it.docId !in localIds } ||
+                    keptOrder != mappedOrder
+            }
             l.copy(
-                pendingPush = snap != null && snap != l.input.pushShapeActive(archivedIds),
+                pendingPush = fieldsPending || photosPending,
                 syncCheckedAt = row[ListingsTable.syncCheckedAt]?.format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME),
             )
         }
