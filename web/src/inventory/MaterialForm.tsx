@@ -4,9 +4,30 @@ import { HexColorPicker } from "react-colorful";
 import { inventoryApi, type Material, type MaterialInput } from "./api";
 import { Button, ErrorText, Field } from "../ui";
 
+/** Bambu Lab PLA Basic palette — the store's full color roster (variant list
+ *  on the product page) with hexes from Bambu's official color card / Studio
+ *  presets (vault: Filament Catalog Checklist). Spectrum-ordered. */
+const BAMBU_PLA_BASIC: { name: string; hex: string }[] = [
+  { name: "Jade White", hex: "#FFFFFF" }, { name: "Beige", hex: "#F7E6DE" },
+  { name: "Light Gray", hex: "#D1D3D5" }, { name: "Silver", hex: "#A6A9AA" },
+  { name: "Gray", hex: "#8E9089" }, { name: "Dark Gray", hex: "#545454" },
+  { name: "Black", hex: "#000000" }, { name: "Blue Gray", hex: "#5B6579" },
+  { name: "Yellow", hex: "#F4EE2A" }, { name: "Sunflower Yellow", hex: "#FEC600" },
+  { name: "Gold", hex: "#E4BD68" }, { name: "Pumpkin Orange", hex: "#FF9016" },
+  { name: "Orange", hex: "#FF6A13" }, { name: "Red", hex: "#C12E1F" },
+  { name: "Maroon Red", hex: "#9D2235" }, { name: "Magenta", hex: "#EC008C" },
+  { name: "Hot Pink", hex: "#F5547C" }, { name: "Pink", hex: "#F55A74" },
+  { name: "Purple", hex: "#5E43B7" }, { name: "Indigo Purple", hex: "#482960" },
+  { name: "Cobalt Blue", hex: "#0056B8" }, { name: "Blue", hex: "#0A2989" },
+  { name: "Cyan", hex: "#0086D6" }, { name: "Turquoise", hex: "#00B1B7" },
+  { name: "Bambu Green", hex: "#00AE42" }, { name: "Mistletoe Green", hex: "#3F8E43" },
+  { name: "Bright Green", hex: "#BECF00" }, { name: "Cocoa Brown", hex: "#6F5034" },
+  { name: "Brown", hex: "#9D432C" }, { name: "Bronze", hex: "#847D48" },
+];
+
 /** Swatch + hex field opening a proper picker popover (react-colorful),
- *  with quick swatches from colors already on the shelf. */
-function ColorField({ value, onChange, presets }: { value: string; onChange: (v: string) => void; presets: string[] }) {
+ *  with the Bambu PLA Basic palette as quick swatches. */
+function ColorField({ value, onChange, presets }: { value: string; onChange: (v: string) => void; presets: { name: string; hex: string }[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -43,15 +64,15 @@ function ColorField({ value, onChange, presets }: { value: string; onChange: (v:
         <div className="absolute z-20 mt-2 rounded-xl border border-line bg-panel p-3 shadow-lg">
           <HexColorPicker color={valid ? value : "#888888"} onChange={onChange} />
           {presets.length > 0 && (
-            <div className="mt-2.5 flex max-w-[200px] flex-wrap gap-1.5">
+            <div className="mt-2.5 grid w-[200px] justify-between gap-y-1.5 [grid-template-columns:repeat(7,1.25rem)]">
               {presets.map((p) => (
                 <button
-                  key={p}
+                  key={p.hex + p.name}
                   type="button"
-                  title={p}
-                  onClick={() => onChange(p)}
-                  className={`h-5 w-5 rounded-full border ${p.toLowerCase() === value.toLowerCase() ? "border-accent ring-1 ring-accent" : "border-line"}`}
-                  style={{ background: p }}
+                  title={p.name}
+                  onClick={() => onChange(p.hex)}
+                  className={`h-5 w-5 rounded-full border ${p.hex.toLowerCase() === value.toLowerCase() ? "border-accent ring-1 ring-accent" : "border-line"}`}
+                  style={{ background: p.hex }}
                 />
               ))}
             </div>
@@ -357,15 +378,7 @@ export function MaterialForm({
               <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">
                 {isFilament ? "Filament color" : "Color (optional)"}
               </span>
-              <ColorField
-                value={color}
-                onChange={setColor}
-                presets={[...new Set(
-                  (allMaterials.data ?? [])
-                    .map((x) => x.attributes.color)
-                    .filter((c): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c)),
-                )].slice(0, 21)}
-              />
+              <ColorField value={color} onChange={setColor} presets={BAMBU_PLA_BASIC} />
               {isFilament && !color && <span className="mt-1 block text-[11px] text-warn">Spool gauges use this color on the wall.</span>}
             </label>
 
