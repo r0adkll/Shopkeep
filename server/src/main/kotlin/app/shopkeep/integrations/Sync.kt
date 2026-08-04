@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.deleteWhere
@@ -941,7 +942,11 @@ class SyncService(
         val completed = o[OrdersTable.completedAt] != null
         val notePrefix = "Order #${o[OrdersTable.platformOrderId]}"
 
-        // The order's reserved BOM straight from the ledger, priced with material costs.
+        // The order's reserved BOM straight from the ledger, priced with
+        // material costs. Active orders NET reservations against releases so
+        // re-resolves/re-matches show only what's still held; completed
+        // orders keep showing what was consumed (their reservations were
+        // converted to release+consumption pairs at completion).
         var matsCost = 0.0
         val mats = dbQuery {
             app.shopkeep.inventory.InventoryTransactionsTable
@@ -952,12 +957,15 @@ class SyncService(
                     otherColumn = app.shopkeep.inventory.MaterialsTable.id,
                 )
                 .selectAll()
-                .where { app.shopkeep.inventory.InventoryTransactionsTable.kind eq "reservation" }
+                .where {
+                    if (completed) app.shopkeep.inventory.InventoryTransactionsTable.kind eq "reservation"
+                    else app.shopkeep.inventory.InventoryTransactionsTable.kind inList listOf("reservation", "release")
+                }
                 .andWhere { app.shopkeep.inventory.InventoryTransactionsTable.note like "$notePrefix%" }
                 .map { r ->
+                    // reservation deltas are negative, release deltas positive:
+                    // -delta nets to "still reserved" across both kinds
                     val qty = -r[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble()
-                    val costQty = r[app.shopkeep.inventory.MaterialsTable.costQuantity].toDouble()
-                    if (costQty > 0) matsCost += qty * r[app.shopkeep.inventory.MaterialsTable.costMinor] / costQty
                     Triple(
                         r[app.shopkeep.inventory.MaterialsTable.id],
                         OrderMaterialView(
@@ -969,13 +977,18 @@ class SyncService(
                             packaging = (r[app.shopkeep.inventory.InventoryTransactionsTable.note] ?: "").endsWith("packaging"),
                             status = if (completed) "consumed" else "reserved",
                         ),
-                        qty,
+                        qty to (r[app.shopkeep.inventory.MaterialsTable.costMinor] to r[app.shopkeep.inventory.MaterialsTable.costQuantity].toDouble()),
                     )
                 }
         }
-        // Collapse duplicate materials (recipe + extras can hit the same spool).
-        val materialRows = mats.groupBy { it.first }.map { (_, rows) ->
-            rows.first().second.copy(quantity = rows.sumOf { it.third })
+        // Collapse duplicate materials (recipe + extras can hit the same
+        // spool) and drop anything fully released; cost prices the NET.
+        val materialRows = mats.groupBy { it.first }.mapNotNull { (_, rows) ->
+            val net = rows.sumOf { it.third.first }
+            if (net <= 0.0005) return@mapNotNull null
+            val (costMinor, costQty) = rows.first().third.second
+            if (costQty > 0) matsCost += net * costMinor / costQty
+            rows.first().second.copy(quantity = net)
         }.map { row ->
             if (row.status == "reserved") {
                 val avail = materials.get(row.materialId)?.stock?.available
