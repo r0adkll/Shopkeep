@@ -90,6 +90,7 @@ class ImportRepository(
     private val listings: ListingRepository,
     private val sync: SyncService,
     private val designs: app.shopkeep.catalog.DesignRepository,
+    private val push: PushService,
 ) {
     suspend fun list(): List<EtsyImport> = dbQuery {
         EtsyImportsTable.selectAll().orderBy(EtsyImportsTable.id).map { it.toDto() }
@@ -238,6 +239,12 @@ class ImportRepository(
                 it[platformState] = imp.payload.state
             }
             EtsyImportsTable.update({ EtsyImportsTable.id eq id }) { it[EtsyImportsTable.listingId] = listingId }
+        }
+        // Seed local media from Etsy so cards get thumbnails and photo/video
+        // sync tracks from day one. Failures never block activation.
+        runCatching { push.pullPhotos(listingId) }
+        if (imp.payload.videos.orEmpty().any { it.videoState != "deleted" }) {
+            runCatching { push.pullField(listingId, "video") }
         }
         val retro = sync.retroMatch(listingId, imp.etsyListingId)
         return ActivateResult(listingId, retro)
