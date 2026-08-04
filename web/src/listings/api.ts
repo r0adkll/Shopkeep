@@ -28,7 +28,7 @@ export type AxisValue = {
   displayLabel?: string | null;
 };
 
-export type Axis = { displayName: string; productSlotPosition: number; values: AxisValue[]; valueSource?: string };
+export type Axis = { displayName: string; productSlotPosition: number; values: AxisValue[]; valueSource?: string; etsyPropertyId?: number | null };
 
 export type Extra = { materialId: number; quantity: number; basis: "per_order" | "per_unit" };
 

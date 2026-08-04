@@ -162,6 +162,24 @@ class PushService(
             val changes = buildChanges(l, l.input.pushShapeActive(archived), current, baselineFor(id, etsyId))
             persistState(id, changes)
             dbQuery { ListingsTable.update({ ListingsTable.id eq id }) { it[platformState] = current.state } }
+            // self-heal: stamp missing axis property ids from live inventory
+            // (imports staged before id capture, or hand-built axes)
+            val livePropIds = current.inventory?.products.orEmpty()
+                .flatMap { it.propertyValues }
+                .filter { it.propertyId != null }
+                .associate { it.propertyName.lowercase() to it.propertyId!! }
+            if (livePropIds.isNotEmpty()) dbQuery {
+                app.shopkeep.listings.ListingAxesTable.selectAll()
+                    .where { app.shopkeep.listings.ListingAxesTable.listingId eq id }
+                    .filter { it[app.shopkeep.listings.ListingAxesTable.etsyPropertyId] == null }
+                    .forEach { a ->
+                        livePropIds[a[app.shopkeep.listings.ListingAxesTable.displayName].lowercase()]?.let { pid ->
+                            app.shopkeep.listings.ListingAxesTable.update(
+                                { app.shopkeep.listings.ListingAxesTable.id eq a[app.shopkeep.listings.ListingAxesTable.id] },
+                            ) { it[etsyPropertyId] = pid }
+                        }
+                    }
+            }
         }
     }
 
@@ -379,7 +397,7 @@ class PushService(
                             putJsonArray("property_values") {
                                 combo.forEach { (ai, v) ->
                                     add(buildJsonObject {
-                                        put("property_id", propIds.getOrElse(ai) { 515L })
+                                        put("property_id", l.input.axes[ai].etsyPropertyId ?: propIds.getOrElse(ai) { 515L })
                                         put("property_name", l.input.axes[ai].displayName)
                                         putJsonArray("values") { add(v.displayLabel ?: v.platformValue ?: "?") }
                                     })
@@ -397,10 +415,11 @@ class PushService(
                         })
                     }
                 }
-                if (skuMode == "per_primary") putJsonArray("sku_on_property") { add(CUSTOM_PROP_1) }
-                if (skuMode == "per_combination") putJsonArray("sku_on_property") { propIds.take(axes.size).forEach { add(it) } }
+                val axisPropId = { ai: Int -> l.input.axes[ai].etsyPropertyId ?: propIds.getOrElse(ai) { 515L } }
+                if (skuMode == "per_primary") putJsonArray("sku_on_property") { add(axisPropId(0)) }
+                if (skuMode == "per_combination") putJsonArray("sku_on_property") { axes.indices.forEach { add(axisPropId(it)) } }
                 val hasPriceOverride = axes.firstOrNull()?.second?.any { it.priceOverrideMinor != null } == true
-                if (hasPriceOverride) putJsonArray("price_on_property") { add(CUSTOM_PROP_1) }
+                if (hasPriceOverride) putJsonArray("price_on_property") { add(axisPropId(0)) }
             }
             connections.etsyWrite(connId, "PUT", "/listings/$etsyId/inventory", body.toString())?.let {
                 return fail(listingId, "inventory: $it")

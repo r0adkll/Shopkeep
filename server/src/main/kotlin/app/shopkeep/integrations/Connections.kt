@@ -91,6 +91,7 @@ data class EtsyTransaction(
 
 @Serializable
 data class EtsyPropertyValue(
+    @SerialName("property_id") val propertyId: Long? = null,
     @SerialName("property_name") val propertyName: String = "",
     val values: List<String> = emptyList(),
 )

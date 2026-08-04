@@ -83,6 +83,7 @@ object ListingAxesTable : Table("listing_axes") {
     val listingId = long("listing_id")
     val position = integer("position")
     val displayName = text("display_name")
+    val etsyPropertyId = long("etsy_property_id").nullable()
     val productSlotPosition = integer("product_slot_position")
     val valueSource = text("value_source")
     override val primaryKey = PrimaryKey(id)
@@ -217,7 +218,15 @@ data class AxisValueInput(
 )
 
 @Serializable
-data class AxisInput(val displayName: String, val productSlotPosition: Int, val values: List<AxisValueInput>, val valueSource: String = "materials")
+data class AxisInput(
+    val displayName: String,
+    val productSlotPosition: Int,
+    val values: List<AxisValueInput>,
+    val valueSource: String = "materials",
+    /** Etsy property id (200 = standard Primary color, 513/514 custom) —
+     *  order matching keys on this; transactions rename standard props. */
+    val etsyPropertyId: Long? = null,
+)
 
 @Serializable
 data class ExtraInput(val materialId: Long, val quantity: Double, val basis: String)
@@ -412,6 +421,7 @@ class ListingRepository(private val products: ProductRepository) {
                 it[listingId] = id
                 it[position] = pos
                 it[displayName] = axis.displayName.trim()
+                it[etsyPropertyId] = axis.etsyPropertyId
                 it[productSlotPosition] = axis.productSlotPosition
                 it[valueSource] = axis.valueSource
             } get ListingAxesTable.id
@@ -487,6 +497,7 @@ class ListingRepository(private val products: ProductRepository) {
             .orderBy(ListingAxesTable.position).map { a ->
                 AxisInput(
                     displayName = a[ListingAxesTable.displayName],
+                    etsyPropertyId = a[ListingAxesTable.etsyPropertyId],
                     productSlotPosition = a[ListingAxesTable.productSlotPosition],
                     valueSource = a[ListingAxesTable.valueSource],
                     values = ListingAxisValuesTable.selectAll()

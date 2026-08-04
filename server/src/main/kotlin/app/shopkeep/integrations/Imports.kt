@@ -56,6 +56,7 @@ data class ImportValueMapping(
 @Serializable
 data class ImportAxisMapping(
     val name: String,
+    val propertyId: Long? = null, // Etsy property id — order matching keys on it
     val slotPosition: Int? = null, // set when mode=materials: which slot the values fill
     val mode: String? = null, // materials | designs | variants | modifier (override matching / no materials)
     val values: List<ImportValueMapping> = emptyList(),
@@ -106,11 +107,15 @@ class ImportRepository(
             ?.firstOrNull { it.listingId == etsyListingId } ?: return null
         // Prefill mapping skeleton from the inventory's axes/values.
         val axes = mutableMapOf<String, MutableSet<String>>()
+        val axisIds = mutableMapOf<String, Long?>()
         listing.inventory?.products?.forEach { p ->
-            p.propertyValues.forEach { pv -> axes.getOrPut(pv.propertyName) { mutableSetOf() }.addAll(pv.values) }
+            p.propertyValues.forEach { pv ->
+                axes.getOrPut(pv.propertyName) { mutableSetOf() }.addAll(pv.values)
+                if (pv.propertyId != null) axisIds[pv.propertyName] = pv.propertyId
+            }
         }
         val mapping = ImportMapping(
-            axes = axes.map { (name, vals) -> ImportAxisMapping(name = name, values = vals.sorted().map { ImportValueMapping(it) }) },
+            axes = axes.map { (name, vals) -> ImportAxisMapping(name = name, propertyId = axisIds[name], values = vals.sorted().map { ImportValueMapping(it) }) },
         )
         val id = dbQuery {
             EtsyImportsTable.insert {
@@ -183,6 +188,7 @@ class ImportRepository(
                     when (mode) {
                         "materials" -> AxisInput(
                             displayName = ax.name,
+                            etsyPropertyId = ax.propertyId,
                             productSlotPosition = ax.slotPosition ?: 0,
                             valueSource = "materials",
                             values = ax.values.filter { it.resolution == "material" }.map { v ->
@@ -191,6 +197,7 @@ class ImportRepository(
                         )
                         "designs" -> AxisInput(
                             displayName = ax.name,
+                            etsyPropertyId = ax.propertyId,
                             productSlotPosition = 0,
                             valueSource = "designs",
                             values = ax.values.filter { it.resolution == "design" && it.designId != null }.map { v ->
@@ -199,6 +206,7 @@ class ImportRepository(
                         )
                         "variants" -> AxisInput(
                             displayName = ax.name,
+                            etsyPropertyId = ax.propertyId,
                             productSlotPosition = 0,
                             valueSource = "variants",
                             values = ax.values.filter { it.resolution == "variant" && it.variantId != null }.map { v ->
@@ -212,6 +220,7 @@ class ImportRepository(
                             val setKeys = designs.designs(productId).flatMap { d -> d.overrideSets.map { it.key } }
                             AxisInput(
                                 displayName = ax.name,
+                            etsyPropertyId = ax.propertyId,
                                 productSlotPosition = 0,
                                 valueSource = "override_sets",
                                 values = ax.values.map { v ->

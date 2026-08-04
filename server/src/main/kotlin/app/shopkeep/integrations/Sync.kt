@@ -616,7 +616,13 @@ class SyncService(
         val pendingDesigns = mutableListOf<Long>()
         var boundOverrideKey: String? = null
         for (axis in listing.input.axes) {
-            val varVal = orderValues.firstOrNull { it.name.equals(axis.displayName, ignoreCase = true) }?.value
+            // property id first (Etsy renames standard props on transactions:
+            // listing says "Primary color", the order says "Color"), then
+            // name, then unambiguous value membership (historic lines whose
+            // ids predate tracking).
+            val varVal = axis.etsyPropertyId?.let { pid -> orderValues.firstOrNull { it.propertyId == pid }?.value }
+                ?: orderValues.firstOrNull { it.name.equals(axis.displayName, ignoreCase = true) }?.value
+                ?: uniqueValueMatch(axis, listing.input.axes, orderValues)
             if (varVal == null) { reasons += "Etsy sent no value for axis “${axis.displayName}”"; continue }
             // axis value rows match by Etsy platform value or the buyer-facing label
             val hit = axis.values.firstOrNull {
@@ -689,6 +695,16 @@ class SyncService(
             listing.id, listing.input.productId, selections, reasons.isNotEmpty(), reasons,
             bom.filterValues { it > 0 }.toList(),
         )
+    }
+
+    private fun uniqueValueMatch(
+        axis: app.shopkeep.listings.AxisInput,
+        axes: List<app.shopkeep.listings.AxisInput>,
+        orderValues: List<EtsyVariation>,
+    ): String? {
+        fun belongs(a: app.shopkeep.listings.AxisInput, v: String) =
+            a.values.any { it.platformValue.equals(v, true) || it.displayLabel.equals(v, true) }
+        return orderValues.map { it.value }.firstOrNull { v -> belongs(axis, v) && axes.count { belongs(it, v) } == 1 }
     }
 
     /** Reserve a dynamically-resolved line from its fully-expanded BOM. */
