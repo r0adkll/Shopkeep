@@ -87,6 +87,8 @@ object OrderLinesTable : Table("order_lines") {
     val matchedListingId = long("matched_listing_id").nullable()
     val resolvedSelections = jsonb<List<app.shopkeep.catalog.ConfigSelection>>("resolved_selections", Json.Default).nullable()
     val needsReview = bool("needs_review")
+    val reviewReasons = jsonb<List<String>>("review_reasons", Json.Default)
+    val reservedBom = jsonb<List<BomLine>>("reserved_bom", Json.Default).nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -118,6 +120,9 @@ object OrderNotesTable : Table("order_notes") {
 }
 
 @Serializable
+data class BomLine(val materialId: Long, val qty: Double)
+
+@Serializable
 data class MatchLineResult(val ok: Boolean, val sweptSiblings: Int, val error: String? = null)
 
 @Serializable
@@ -137,6 +142,7 @@ data class OrderLineView(
     val matchedListing: Boolean = false,
     val matchedListingId: Long? = null, // canonical listing behind either match path
     val needsReview: Boolean = false,
+    val reviewReasons: List<String> = emptyList(),
     val productName: String?,
     val colors: List<LineColor> = emptyList(),
     val variations: List<EtsyVariation>,
@@ -341,6 +347,8 @@ class SyncService(
                         it[matchedListingId] = imported?.listingId
                         it[resolvedSelections] = imported?.selections
                         it[needsReview] = imported?.needsReview ?: false
+                        it[reviewReasons] = imported?.reasons ?: emptyList()
+                        it[reservedBom] = imported?.bom?.map { (m, q) -> BomLine(m, q) }
                     }
                 }
                 if (personalization.isNotEmpty()) anyPersonalized = true
@@ -459,6 +467,8 @@ class SyncService(
         val productId: Long,
         val selections: List<app.shopkeep.catalog.ConfigSelection>,
         val needsReview: Boolean,
+        /** Human-readable causes behind needsReview — shown on the order line. */
+        val reasons: List<String> = emptyList(),
         /** Fully-expanded BOM (materialId -> qty per unit): choice slots via
          *  material/design resolution (incl. qty overrides + override sets),
          *  fixed slots, variant slot-deltas and extra materials. */
@@ -487,7 +497,7 @@ class SyncService(
     /** Resolve a line against a specific listing (manual match bypasses lookup). */
     suspend fun resolveWithListing(listing: app.shopkeep.listings.Listing, txn: EtsyTransaction): ImportedResolution? {
         val product = products.get(listing.input.productId) ?: return null
-        var review = false
+        val reasons = mutableListOf<String>()
         val selections = mutableListOf<app.shopkeep.catalog.ConfigSelection>()
         val bom = mutableMapOf<Long, Double>()
         fun addBom(materialId: Long, qty: Double) { bom[materialId] = (bom[materialId] ?: 0.0) + qty }
@@ -512,7 +522,7 @@ class SyncService(
         var boundOverrideKey: String? = null
         for (axis in listing.input.axes) {
             val varVal = orderValues.firstOrNull { it.name.equals(axis.displayName, ignoreCase = true) }?.value
-            if (varVal == null) { review = true; continue }
+            if (varVal == null) { reasons += "Etsy sent no value for axis “${axis.displayName}”"; continue }
             // axis value rows match by Etsy platform value or the buyer-facing label
             val hit = axis.values.firstOrNull {
                 it.platformValue.equals(varVal, ignoreCase = true) || it.displayLabel.equals(varVal, ignoreCase = true)
@@ -522,31 +532,32 @@ class SyncService(
                     hit.overrideKey != null -> if (hit.overrideKey != "base") boundOverrideKey = hit.overrideKey
                     hit.variantId != null -> {
                         val v = designs.variant(hit.variantId!!)
-                        if (v == null) review = true else variantAdj = v.adjustments
+                        if (v == null) reasons += "the variant behind “$varVal” no longer exists" else variantAdj = v.adjustments
                     }
                     hit.designId != null -> pendingDesigns += hit.designId!!
                     hit.materialId != null -> addSelection(axis.productSlotPosition, hit.materialId!!, slotQty(axis.productSlotPosition))
-                    else -> review = true
+                    else -> reasons += "“$varVal” (${axis.displayName}) has no material/design/variant source on the listing"
                 }
                 continue
             }
             // imported-listing path: value_resolutions by axis+value
             val res = resolutions.firstOrNull { it.axis.equals(axis.displayName, true) && it.value.equals(varVal, true) }
             when (res?.kind) {
-                "design" -> res.refId?.let { pendingDesigns += it } ?: run { review = true }
+                "design" -> res.refId?.let { pendingDesigns += it } ?: run { reasons += "the design behind “$varVal” isn’t set" }
                 "variant" -> {
                     val v = res.refId?.let { designs.variant(it) }
-                    if (v == null) review = true else variantAdj = v.adjustments
+                    if (v == null) reasons += "the variant behind “$varVal” no longer exists" else variantAdj = v.adjustments
                 }
                 "ignore" -> {}
-                else -> review = true // "review" or unmapped value
+                "review" -> reasons += "“$varVal” (${axis.displayName}) is set to review-per-order — pick its materials by hand"
+                else -> reasons += "“$varVal” (${axis.displayName}) is unmapped on the listing"
             }
         }
         // Pass 2: expand designs — explicit bind wins; else name-match any
         // order value against override-set keys (imported listings).
         for (designId in pendingDesigns) {
             val d = designs.design(designId)
-            if (d == null) { review = true; continue }
+            if (d == null) { reasons += "a mapped design was deleted from the product"; continue }
             val set = boundOverrideKey?.let { k -> d.overrideSets.firstOrNull { it.key.equals(k, true) } }
                 ?: d.overrideSets.firstOrNull { os -> orderValues.any { it.value.equals(os.key, ignoreCase = true) } }
             for (a in (set?.assignments ?: d.assignments)) {
@@ -558,7 +569,7 @@ class SyncService(
             if (res.kind != "variant" || variantAdj != null) continue
             if (orderValues.any { it.name.equals(res.axis, true) && it.value.equals(res.value, true) }) {
                 val v = res.refId?.let { designs.variant(it) }
-                if (v != null) variantAdj = v.adjustments else review = true
+                if (v != null) variantAdj = v.adjustments else reasons += "the variant behind “${res.value}” no longer exists"
             }
         }
         // fixed slots
@@ -578,7 +589,7 @@ class SyncService(
             adj.extras.forEach { e -> addBom(e.materialId, e.quantity) }
         }
         return ImportedResolution(
-            listing.id, listing.input.productId, selections, review,
+            listing.id, listing.input.productId, selections, reasons.isNotEmpty(), reasons,
             bom.filterValues { it > 0 }.toList(),
         )
     }
@@ -632,6 +643,8 @@ class SyncService(
                 it[matchedListingId] = r.listingId
                 it[resolvedSelections] = r.selections
                 it[needsReview] = r.needsReview
+                it[reviewReasons] = r.reasons
+                it[reservedBom] = if (!dead && order[OrdersTable.completedAt] == null) r.bom.map { (m, q) -> BomLine(m, q) } else null
             }
             val stillUnmatched = OrderLinesTable.selectAll()
                 .where { OrderLinesTable.orderId eq order[OrdersTable.id] }
@@ -678,6 +691,57 @@ class SyncService(
             swept = retroMatch(listingId, pid)
         }
         return MatchLineResult(true, swept, null)
+    }
+
+    /** Re-resolve an already-matched line against its listing's CURRENT
+     *  mappings (after the owner fixes designs/values): release exactly what
+     *  the line reserved, resolve fresh, reserve anew. */
+    suspend fun reresolveLine(lineId: Long): MatchLineResult? {
+        val l = dbQuery {
+            OrderLinesTable.selectAll().where { OrderLinesTable.id eq lineId }.singleOrNull()
+        } ?: return null
+        val targetId = l[OrderLinesTable.matchedListingId]
+            ?: return MatchLineResult(false, 0, "Line isn't matched via a listing.")
+        val listing = listings.get(targetId) ?: return MatchLineResult(false, 0, "Listing not found.")
+        val order = dbQuery {
+            OrdersTable.selectAll().where { OrdersTable.id eq l[OrderLinesTable.orderId] }.single()
+        }
+        val alive = order[OrdersTable.platformStatus] !in setOf("canceled", "fully refunded") &&
+            order[OrdersTable.completedAt] == null
+        if (alive) {
+            val note = "Order #${order[OrdersTable.platformOrderId]}"
+            val oldBom = l[OrderLinesTable.reservedBom]
+            if (oldBom != null) {
+                for (b in oldBom) {
+                    materials.recordTransaction(b.materialId, b.qty * l[OrderLinesTable.quantity], TxnKind.RELEASE, "$note (re-resolve)", null)
+                }
+            } else {
+                // pre-BOM-tracking line: only safe to net out the order's
+                // reservations when this is its sole matched line
+                val siblings = dbQuery {
+                    OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq order[OrdersTable.id] }
+                        .count { it[OrderLinesTable.id] != lineId && (it[OrderLinesTable.matchedListingId] != null || it[OrderLinesTable.listingConfigurationId] != null) }
+                }
+                if (siblings > 0) return MatchLineResult(false, 0, "Can't safely release this line's old reservations (other matched lines predate BOM tracking).")
+                dbQuery {
+                    app.shopkeep.inventory.InventoryTransactionsTable.selectAll()
+                        .where { app.shopkeep.inventory.InventoryTransactionsTable.note eq note }
+                        .groupBy { it[app.shopkeep.inventory.InventoryTransactionsTable.materialId] }
+                        .mapValues { (_, txns) -> txns.sumOf { it[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble() } }
+                        .filterValues { it < 0 }
+                } .forEach { (matId, net) ->
+                    materials.recordTransaction(matId, -net, TxnKind.RELEASE, "$note (re-resolve)", null)
+                }
+            }
+        }
+        val txn = EtsyTransaction(
+            listingId = null,
+            quantity = l[OrderLinesTable.quantity],
+            variations = l[OrderLinesTable.variations] + l[OrderLinesTable.personalization],
+        )
+        val r = resolveWithListing(listing, txn) ?: return MatchLineResult(false, 0, "The listing's product couldn't be loaded.")
+        applyResolution(l, r, "re-resolved from the listing's current mappings")
+        return MatchLineResult(true, 0, null)
     }
 
     /** Re-run matching on demand: backfill platform listing ids that early
@@ -807,6 +871,7 @@ class SyncService(
                         matchedListingId = l[OrderLinesTable.matchedListingId]
                             ?: l[OrderLinesTable.listingConfigurationId]?.let(configListing::get),
                         needsReview = l[OrderLinesTable.needsReview],
+                        reviewReasons = l[OrderLinesTable.reviewReasons],
                         productName = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.second }
                             ?: l[OrderLinesTable.matchedListingId]?.let(listingProductNames::get),
                         colors = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.third }

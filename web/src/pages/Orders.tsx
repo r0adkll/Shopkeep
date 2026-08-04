@@ -23,6 +23,7 @@ type OrderLine = {
   matchedListing: boolean;
   matchedListingId: number | null;
   needsReview: boolean;
+  reviewReasons: string[];
   productName: string | null;
   colors: LineColor[];
   variations: Variation[];
@@ -329,6 +330,16 @@ function OrderDetailPanel(props: {
     queryFn: () => jsonFetch<OrderDetail>(`/api/v1/orders/${orderId}`),
   });
   const [matching, setMatching] = useState<OrderLine | null>(null);
+  const [reresolveErr, setReresolveErr] = useState<string | null>(null);
+  const reresolve = useMutation({
+    mutationFn: (lineId: number) => jsonFetch(`/api/v1/orders/lines/${lineId}/reresolve`, { method: "POST" }),
+    onSuccess: () => {
+      setReresolveErr(null);
+      qc.invalidateQueries({ queryKey: ["order", orderId] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+    onError: (e) => setReresolveErr(e instanceof Error ? e.message : "Re-resolve failed."),
+  });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -526,7 +537,16 @@ function OrderDetailPanel(props: {
                       ) : l.matchedListing ? (
                         <>
                           <span className="font-mono font-semibold text-good">✓ via listing{l.needsReview ? <b className="text-warn"> · needs review</b> : ""}</span>
-                          <span className="ml-auto text-[10px] font-semibold text-accent opacity-0 group-hover:opacity-100">open listing ↗</span>
+                          <button
+                            type="button"
+                            title="Release this line's reservations and resolve again from the listing's current mappings — use after fixing the listing"
+                            disabled={reresolve.isPending}
+                            onClick={(e) => { e.stopPropagation(); reresolve.mutate(l.id); }}
+                            className="ml-auto flex items-center gap-1 rounded-md border border-line px-2 py-0.5 text-[10px] font-semibold text-ink2 hover:border-accent hover:text-accent disabled:opacity-50"
+                          >
+                            <RefreshCw size={10} className={reresolve.isPending ? "animate-spin" : ""} /> re-resolve
+                          </button>
+                          <span className="text-[10px] font-semibold text-accent opacity-0 group-hover:opacity-100">open listing ↗</span>
                         </>
                       ) : (
                         <>
@@ -541,8 +561,18 @@ function OrderDetailPanel(props: {
                         </>
                       )}
                     </div>
+                    {l.needsReview && l.matchedListing && (
+                      <div className="mt-1.5 rounded-lg border border-warn/50 bg-warn/5 px-2.5 py-1.5">
+                        <div className="text-[9px] font-extrabold tracking-widest text-warn uppercase">Needs review — couldn't fully resolve</div>
+                        {(l.reviewReasons.length > 0 ? l.reviewReasons : ["an option couldn't be resolved when this line was matched — re-resolve to see current details"]).map((r, i) => (
+                          <div key={i} className="mt-0.5 text-[11px] leading-snug text-ink2">· {r}</div>
+                        ))}
+                        <div className="mt-1 text-[10px] text-mut">Fix the mapping on the listing (or its product's designs), then <b>re-resolve</b> above — reservations are released and redone from the new answer.</div>
+                      </div>
+                    )}
                   </div>
                 ))}
+                {reresolveErr && <p className="mb-2 text-xs font-medium text-crit">{reresolveErr}</p>}
                 <table className="w-full text-xs">
                   <tbody>
                     {d.subtotalMinor != null && (

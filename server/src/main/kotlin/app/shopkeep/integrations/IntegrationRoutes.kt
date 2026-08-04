@@ -37,6 +37,15 @@ fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService
         // Phase 4 matching tooling: on-demand retro-match sweep + manual match.
         post("/orders/rematch") { call.respond(sync.rematchAll()) }
 
+        post("/orders/lines/{id}/reresolve") {
+            val r = call.parameters["id"]?.toLongOrNull()?.let { sync.reresolveLine(it) }
+            when {
+                r == null -> call.respond(HttpStatusCode.NotFound, ApiError("Line not found."))
+                !r.ok -> call.respond(HttpStatusCode.UnprocessableEntity, ApiError(r.error ?: "Couldn't re-resolve."))
+                else -> call.respond(r)
+            }
+        }
+
         post("/orders/lines/{id}/match") {
             val id = call.parameters["id"]?.toLongOrNull()
             val req = call.receive<MatchLineRequest>()
