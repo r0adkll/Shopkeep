@@ -56,7 +56,7 @@ export function ProductsPage() {
               </button>
             </Card>
           )}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {(products.data ?? []).map((p) => (
               <button
                 key={p.id}
