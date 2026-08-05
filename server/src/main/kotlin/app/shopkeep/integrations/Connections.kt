@@ -174,6 +174,14 @@ data class EtsyShopListing(
 data class EtsyShopListings(val count: Int = 0, val results: List<EtsyShopListing> = emptyList())
 
 @Serializable
+data class EtsyShipment(
+    @SerialName("receipt_shipping_id") val receiptShippingId: Long? = null,
+    @SerialName("shipment_notification_timestamp") val notificationTimestamp: Long = 0,
+    @SerialName("carrier_name") val carrierName: String? = null,
+    @SerialName("tracking_code") val trackingCode: String? = null,
+)
+
+@Serializable
 data class EtsyReceipt(
     @SerialName("receipt_id") val receiptId: Long = 0,
     val name: String = "",
@@ -182,6 +190,7 @@ data class EtsyReceipt(
     @SerialName("created_timestamp") val createdTimestamp: Long = 0,
     val status: String = "paid", // paid|completed|open|payment processing|canceled|fully refunded|partially refunded
     val transactions: List<EtsyTransaction> = emptyList(),
+    val shipments: List<EtsyShipment> = emptyList(),
     // Ship-to, status, gift, and money breakdown (order detail concept).
     @SerialName("first_line") val firstLine: String? = null,
     @SerialName("second_line") val secondLine: String? = null,

@@ -67,6 +67,8 @@ type OrderDetail = {
   shipFeesMinor: number | null;
   shipEstimateMinor: number | null;
   shipEstimateSource: "usps" | "profile" | null;
+  shipments: { source: string; carrierName: string | null; trackingCode: string | null; labelCostMinor: number | null; at: string | null }[];
+  shipPackage: { boxName: string | null; weightGrams: number | null } | null;
   shipName: string | null;
   shipLine1: string | null;
   shipLine2: string | null;
@@ -367,6 +369,7 @@ function OrderDetailPanel(props: {
     queryFn: () => jsonFetch<OrderDetail>(`/api/v1/orders/${orderId}`),
   });
   const [matching, setMatching] = useState<OrderLine | null>(null);
+  const [shipOpen, setShipOpen] = useState(false);
   const [reresolveErr, setReresolveErr] = useState<string | null>(null);
   const reresolve = useMutation({
     mutationFn: (lineId: number) => jsonFetch(`/api/v1/orders/lines/${lineId}/reresolve`, { method: "POST" }),
@@ -723,16 +726,77 @@ function OrderDetailPanel(props: {
           )}
         </div>
 
-        {/* footer */}
-        <div className="flex items-center gap-3 border-t border-line px-5 py-3">
+        {/* action row (locked ship concept — Order Management § Fulfillment) */}
+        <div className="flex flex-wrap items-center gap-3 border-t border-line px-5 py-3">
           <span className="font-mono text-[15px] font-bold">{o ? money(o.totalMinor) : "…"} <span className="text-[10px] font-semibold text-mut">{o?.currency}</span></span>
-          <button
-            disabled
-            title="Phase 5: buy label + print insert slip"
-            className="ml-auto cursor-not-allowed rounded-lg bg-accent/40 px-4 py-1.5 text-sm font-bold text-white"
-          >
-            Ship…
-          </button>
+          {d && o && (d.shipments.length > 0 || d.platformShipped) ? (
+            <>
+              <span className="rounded-full bg-good/10 px-2 py-0.5 text-[9.5px] font-extrabold tracking-wider text-good">✓ SHIPPED</span>
+              {d.shipments[0]?.trackingCode && (
+                <span className="text-xs text-ink2">{d.shipments[0].carrierName ?? ""} <b className="font-mono">{d.shipments[0].trackingCode}</b></span>
+              )}
+              {d.shipments[0]?.labelCostMinor != null && (
+                <span className="text-xs text-ink2">label <b className="font-mono">{money(d.shipments[0].labelCostMinor)}</b></span>
+              )}
+              <button disabled title="packing slip printing arrives with the next build step"
+                className="ml-auto rounded-md border border-line px-3 py-1 text-xs font-semibold text-mut">
+                🖨 Packing slip
+              </button>
+            </>
+          ) : d && o && !DEAD_STATUSES.includes(o.platformStatus) && o.lines.every((l) => l.matchedSku || l.matchedListing) ? (
+            <button onClick={() => setShipOpen(true)} className="ml-auto rounded-lg bg-accent px-4 py-1.5 text-sm font-bold text-white hover:opacity-90">
+              📦 Ship…
+            </button>
+          ) : (
+            <span className="ml-auto text-[11px] text-mut">{d && o && !o.lines.every((l) => l.matchedSku || l.matchedListing) ? "match all lines to ship" : ""}</span>
+          )}
+        </div>
+
+        {/* Ship bottom sheet */}
+        {shipOpen && <div className="absolute inset-0 z-10 bg-black/30" onClick={() => setShipOpen(false)} />}
+        <div className={`absolute inset-x-0 bottom-0 z-20 max-h-[85%] overflow-y-auto rounded-t-2xl border-t border-line bg-panel px-5 pt-3 pb-5 shadow-2xl transition-transform duration-200 ${shipOpen ? "translate-y-0" : "translate-y-full"}`}>
+          <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-line" />
+          <div className="mb-2 flex items-center justify-between">
+            <b className="text-[14.5px]">Ship this order</b>
+            <button onClick={() => setShipOpen(false)} className="rounded-md border border-line px-2 py-0.5 text-xs text-ink2 hover:text-ink">✕</button>
+          </div>
+          {d && o && (
+            <>
+              <div className="mb-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink2">
+                <span>to <b className="text-ink">{d.shipCity}, {d.shipState} {d.shipZip}</b></span>
+                <span>box <b className="text-ink">{d.shipPackage?.boxName ?? "—"}</b></span>
+                <span>weight <b className="font-mono text-ink">{d.shipPackage?.weightGrams != null ? `${Math.round(d.shipPackage.weightGrams)} g` : "—"}</b></span>
+              </div>
+              {d.shipEstimateMinor != null && (
+                <p className="mb-2 text-[11px] text-mut">
+                  Shipping label {d.shipEstimateSource === "usps" ? "quote" : "estimate"} {money(d.shipEstimateMinor)} — replaced by the actual ledger cost once Etsy reports the label.
+                </p>
+              )}
+              <div className="border-t border-dotted border-line py-2.5">
+                <b className="text-[13px]">1 · Packing slip</b>
+                <span className="ml-2 text-[11px] text-mut">printing arrives with the next build step</span>
+              </div>
+              <div className="border-t border-dotted border-line py-2.5">
+                <b className="text-[13px]">2 · Buy &amp; print the label on Etsy</b>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <a
+                    href={`https://www.etsy.com/your/orders/sold?order_id=${o.platformOrderId}`}
+                    target="_blank" rel="noreferrer"
+                    className="flex items-center gap-1 rounded-md border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/5"
+                  >
+                    <ExternalLink size={12} /> Open on Etsy
+                  </a>
+                  <span className="text-[11px] text-mut">buy and print the label in Shop Manager</span>
+                </div>
+              </div>
+              <div className="border-t border-dotted border-line py-2.5">
+                <b className="text-[13px]">3 · Shopkeep finishes automatically</b>
+                <p className="mt-0.5 text-[11px] text-mut">
+                  Tracking, carrier, and the real label cost arrive with the next poll (≤5 min); the order completes itself. This sheet can be dismissed any time.
+                </p>
+              </div>
+            </>
+          )}
         </div>
       </aside>
     </>
