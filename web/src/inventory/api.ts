@@ -56,6 +56,29 @@ export type PrefillResult = {
   note?: string | null;
 };
 
+export type CatalogSize = {
+  weightGrams: number | null;
+  spoolWeightGrams: number | null;
+  refill: boolean;
+  articleNumber: string | null;
+};
+
+export type CatalogFilament = {
+  variantId: string;
+  brand: string;
+  line: string;
+  material: string;
+  colorName: string;
+  colorHex: string | null;
+  density: number | null;
+  dataSheetUrl: string | null;
+  discontinued: boolean;
+  sizes: CatalogSize[];
+};
+
+export type CatalogBrand = { name: string; variants: number };
+export type CatalogStatus = { version: string | null; refreshedAt: string | null; variants: number };
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/v1/inventory${path}`, {
     headers: init?.body ? { "Content-Type": "application/json" } : undefined,
@@ -97,6 +120,11 @@ export const inventoryApi = {
       body: JSON.stringify({ delta, kind, note }),
     }),
   purchasing: () => req<Material[]>("/purchasing"),
+  filamentDbSearch: (q: string, brand?: string | null) =>
+    req<CatalogFilament[]>(`/filamentdb/search?q=${encodeURIComponent(q)}${brand ? `&brand=${encodeURIComponent(brand)}` : ""}`),
+  filamentDbBrands: () => req<CatalogBrand[]>("/filamentdb/brands"),
+  filamentDbStatus: () => req<CatalogStatus>("/filamentdb/status"),
+  filamentDbRefresh: () => req<CatalogStatus>("/filamentdb/refresh", { method: "POST" }),
 };
 
 /** Ring-fill fraction for gauges: full_quantity is the reference capacity;

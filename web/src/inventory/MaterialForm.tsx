@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HexColorPicker } from "react-colorful";
-import { inventoryApi, type Material, type MaterialInput } from "./api";
+import { inventoryApi, type CatalogFilament, type Material, type MaterialInput } from "./api";
+import { FilamentCatalogDialog } from "./FilamentCatalogDialog";
 import { Button, ErrorText, Field } from "../ui";
 
 /** Bambu Lab PLA Basic palette — the store's full color roster (variant list
@@ -244,6 +245,44 @@ export function MaterialForm({
     onError: (e) => setPrefillNote(e instanceof Error ? e.message : "Prefill failed."),
   });
 
+  // "Add from catalog": one pick fills everything a spool needs — name,
+  // brand, type, color hex, spool size — plus the stable OFD variant id in
+  // attributes (the key for future palettes / weigh-in tares / telemetry).
+  const [browsing, setBrowsing] = useState(false);
+  const applyCatalog = (f: CatalogFilament) => {
+    const size = f.sizes.find((s) => !s.refill && s.weightGrams) ?? f.sizes.find((s) => s.weightGrams);
+    const grams = size?.weightGrams ?? 1000;
+    const line = f.line.toLowerCase();
+    const knownTypes = PROFILES.filament.types;
+    const type =
+      knownTypes.find((t) => t.toLowerCase() === line) ??
+      (f.material === "PLA" && line.includes("matte") ? "PLA Matte" : null) ??
+      (f.material === "PLA" && line.includes("silk") ? "PLA Silk" : null) ??
+      (/[ -]cf\b/.test(line) && knownTypes.includes(`${f.material}-CF`) ? `${f.material}-CF` : null) ??
+      (f.material === "PLA" ? "PLA Basic" : knownTypes.find((t) => t === f.material)) ??
+      f.line;
+    if (!knownTypes.includes(type)) setCustomType(true);
+    setM((prev) => ({
+      ...prev,
+      name: prev.name || `${f.colorName} ${f.line}`,
+      brand: prev.brand || f.brand,
+      category: prev.category || "filament",
+      type: prev.type || type,
+      unit: prev.unit || "g",
+      costQuantity: prev.costQuantity !== 1 ? prev.costQuantity : grams,
+      fullQuantity: prev.fullQuantity ?? grams,
+      attributes: {
+        ...prev.attributes,
+        ofdVariantId: f.variantId,
+        ...(f.density != null ? { densityGcm3: String(f.density) } : {}),
+        ...(size?.spoolWeightGrams != null ? { spoolWeightGrams: String(size.spoolWeightGrams) } : {}),
+      },
+    }));
+    if (f.colorHex && !color) setColor(f.colorHex);
+    setPrefillNote(`From catalog: ${f.brand} ${f.line} — ${f.colorName}${f.discontinued ? " (discontinued)" : ""}`);
+    setBrowsing(false);
+  };
+
   return (
     <div className="fixed inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/40 p-6" onClick={onClose}>
       <div className="w-full max-w-lg rounded-xl border border-line bg-panel p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
@@ -267,10 +306,18 @@ export function MaterialForm({
                 {prefill.isPending ? "Fetching…" : "Prefill"}
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => setBrowsing(true)}
+              className="mt-2 w-full rounded-md border border-line bg-panel px-3 py-1.5 text-xs font-semibold text-ink2 hover:border-accent hover:text-accent"
+            >
+              …or browse the filament catalog (150+ brands, official colors)
+            </button>
             {prefillNote && <p className="mt-1.5 text-[11px] text-ink2">{prefillNote}</p>}
             <p className="mt-1 text-[10.5px] text-mut">Fills only fields you haven't touched — everything stays editable. Amazon links often block fetches; the URL is kept either way.</p>
           </div>
         )}
+        {browsing && <FilamentCatalogDialog onPick={applyCatalog} onClose={() => setBrowsing(false)} />}
         <form
           className="space-y-4"
           onSubmit={(e) => {

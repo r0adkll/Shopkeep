@@ -16,6 +16,7 @@ import app.shopkeep.integrations.mockEtsyRoutes
 import app.shopkeep.listings.listingRoutes
 import app.shopkeep.inventory.inventoryRoutes
 import app.shopkeep.inventory.vendorPrefillRoutes
+import app.shopkeep.inventory.filamentCatalogRoutes
 import app.shopkeep.fulfillment.packingSlipRoutes
 import app.shopkeep.config.AppConfig
 import app.shopkeep.db.connectExposed
@@ -116,6 +117,8 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
                 .onFailure { log.warn("storefront sync failed: ${it.message}") }
             // Q8: completed orders leave the active board after the window.
             runCatching { graph.syncService.archiveCompleted(config.orderArchiveDays) }
+            runCatching { graph.filamentCatalog.refreshIfStale() }
+                .onFailure { log.warn("Filament catalog refresh failed: {}", it.message) }
                 .onFailure { log.warn("order archive sweep failed: ${it.message}") }
             delay(config.syncIntervalMinutes * 60_000)
         }
@@ -129,6 +132,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             oidcRoutes(graph.oidcService, graph.userRepository)
             inventoryRoutes(graph.materialRepository)
             vendorPrefillRoutes(graph.vendorPrefillService)
+            filamentCatalogRoutes(graph.filamentCatalog)
             packingSlipRoutes(graph.packingSlipService)
             catalogRoutes(graph.productRepository)
             documentRoutes(graph.documentRepository)
