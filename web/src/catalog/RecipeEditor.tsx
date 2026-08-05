@@ -13,7 +13,8 @@ import {
   type SortKey,
 } from "../inventory/api";
 import { MaterialIcon } from "../inventory/MaterialIcon";
-import { MaterialPicker } from "../inventory/MaterialPicker";
+import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
+import { MaterialForm } from "../inventory/MaterialForm";
 import { Button, ErrorText, Field } from "../ui";
 import { catalogApi, documentUrl, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
 
@@ -487,6 +488,65 @@ function ImagePicker({
 
 /* ---------------- slot card ---------------- */
 
+/** Fixed slot: rich display of the chosen material (swatch, brand, type,
+ *  stock, unit cost) with change/select through the shared picker dialog. */
+function FixedMaterialRow({ all, material, onChange }: {
+  all: Material[];
+  material: Material | null;
+  onChange: (id: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const perUnit = material && material.costQuantity > 0 ? material.costMinor / material.costQuantity : null;
+  return (
+    <div className="mt-2">
+      {material ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel2/60 px-3 py-2">
+          <span className="h-8 w-8 flex-none rounded-lg border border-line" style={{ background: materialColor(material) ?? "var(--color-panel2)" }} />
+          <span className="min-w-0">
+            <span className="flex items-baseline gap-1.5">
+              <b className="truncate text-sm">{material.name}</b>
+              {material.brand && <span className="text-[11px] text-mut">{material.brand}</span>}
+            </span>
+            <span className="text-[11px] text-ink2">{material.type} · {material.category}</span>
+          </span>
+          <span className="ml-auto text-right text-[11px]">
+            <span className={`block font-mono ${material.stock.available <= 0 ? "font-bold text-crit" : material.status !== "OK" ? "font-bold text-warn" : "text-ink2"}`}>
+              {formatQty(material.stock.available)} {material.unit} available
+            </span>
+            {perUnit != null && <span className="text-mut">${(perUnit / 100).toFixed(perUnit < 100 ? 3 : 2)}/{material.unit}</span>}
+          </span>
+          <button type="button" onClick={() => setOpen(true)}
+            className="rounded-md border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/5">
+            change
+          </button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)}
+          className="w-full rounded-lg border border-dashed border-line py-2.5 text-sm text-accent hover:border-accent">
+          + Select material…
+        </button>
+      )}
+      {open && (
+        <MaterialPickerDialog
+          all={all}
+          title={material ? `Replace ${material.name}` : "Pick the fixed material"}
+          onPick={(id) => { onChange(id); setOpen(false); }}
+          onCreateNew={() => { setOpen(false); setCreating(true); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+      {creating && (
+        <MaterialForm
+          categories={[...new Set(all.map((m) => m.category))]}
+          onSaved={(m) => onChange(m.id)}
+          onClose={() => setCreating(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 function SlotCard({
   slot,
   all,
@@ -560,13 +620,11 @@ function SlotCard({
       </div>
 
       {slot.kind === "FIXED" ? (
-        <div className="mt-2">
-          <MaterialPicker
-            all={all}
-            value={slot.fixedMaterialId != null ? (byId.get(slot.fixedMaterialId) ?? null) : null}
-            onChange={(id) => onChange({ fixedMaterialId: id })}
-          />
-        </div>
+        <FixedMaterialRow
+          all={all}
+          material={slot.fixedMaterialId != null ? (byId.get(slot.fixedMaterialId) ?? null) : null}
+          onChange={(id) => onChange({ fixedMaterialId: id })}
+        />
       ) : (
         <>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-mut">
