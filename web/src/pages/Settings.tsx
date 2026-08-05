@@ -3,8 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { AppShell, Card, ErrorText, Field } from "../ui";
-import etsyLogo from "../assets/etsy-icon.png";
-import uspsLogo from "../assets/usps-icon.png";
 
 type Capabilities = { maxPhotos: number; maxVariationAxes: number; skuOnAllAxes: boolean };
 type Connection = {
@@ -41,10 +39,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Platform branding — official marks (bundled locally, no CDN hotlinks). */
-const BRAND: Record<string, { bg: string; logo: string; name: string }> = {
-  etsy: { bg: "#F1641E", logo: etsyLogo, name: "Etsy" },
-  usps: { bg: "#004B87", logo: uspsLogo, name: "USPS" },
+/** Brand color only — used sparingly (platform name, dialog selection). */
+const BRAND: Record<string, { color: string; name: string }> = {
+  etsy: { color: "#F1641E", name: "Etsy" },
+  usps: { color: "#004B87", name: "USPS" },
 };
 
 const STATUS_STYLE: Record<Connection["status"], string> = {
@@ -117,14 +115,10 @@ export function SettingsPage() {
       {(connections.data ?? []).map((c) => (
         <Card key={c.id} className="mb-3">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-lg border border-line bg-white" aria-label={BRAND[c.platform]?.name ?? c.platform}>
-              {BRAND[c.platform] ? (
-                <img src={BRAND[c.platform].logo} alt="" className="h-full w-full object-contain" />
-              ) : (
-                <span className="text-sm font-bold capitalize">{c.platform[0]}</span>
-              )}
+            <span className="text-[15px] font-bold" style={{ color: BRAND[c.platform]?.color }}>
+              {BRAND[c.platform]?.name ?? c.platform}
             </span>
-            {c.shopName && <span className="text-[15px] font-semibold text-ink">{c.shopName}</span>}
+            {c.shopName && <span className="text-sm font-medium text-ink">{c.shopName}</span>}
             {c.label && c.label.toLowerCase() !== c.platform && <span className="text-xs text-mut">({c.label})</span>}
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider uppercase ${STATUS_STYLE[c.status]}`}>
               {c.status}
@@ -194,11 +188,8 @@ export function SettingsPage() {
             <div className="mb-4 flex gap-2">
               {(["etsy", "usps"] as const).map((p) => (
                 <button key={p} type="button" onClick={() => setAddPlatform(p)}
-                  className={`flex items-center gap-2.5 rounded-lg border px-4 py-2 text-sm font-semibold ${addPlatform === p ? "text-ink" : "border-line text-ink2 hover:text-ink"}`}
-                  style={addPlatform === p ? { borderColor: BRAND[p].bg, boxShadow: `inset 0 0 0 1px ${BRAND[p].bg}` } : undefined}>
-                  <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-md border border-line bg-white">
-                    <img src={BRAND[p].logo} alt="" className="h-full w-full object-contain" />
-                  </span>
+                  className={`rounded-lg border px-4 py-2 text-sm font-semibold ${addPlatform === p ? "" : "border-line text-ink2 hover:text-ink"}`}
+                  style={addPlatform === p ? { borderColor: BRAND[p].color, color: BRAND[p].color, boxShadow: `inset 0 0 0 1px ${BRAND[p].color}` } : undefined}>
                   {p === "etsy" ? "Etsy shop" : "USPS shipping"}
                 </button>
               ))}
