@@ -46,7 +46,7 @@ const STATUS_STYLE: Record<Connection["status"], string> = {
   disconnected: "bg-line/60 text-mut",
 };
 
-export function ConnectionsPage() {
+export function SettingsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
@@ -78,11 +78,22 @@ export function ConnectionsPage() {
   });
 
   const isAdmin = me.data?.role === "ADMIN";
+  const [adding, setAdding] = useState(false);
+  const [addPlatform, setAddPlatform] = useState<"etsy" | "usps">("etsy");
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
 
   return (
-    <AppShell active="Connections">
+    <AppShell active="Settings">
       <div className="mx-auto max-w-4xl">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-[13px] font-bold tracking-widest text-ink2 uppercase">Connections</h2>
+        {isAdmin && (
+          <button type="button" onClick={() => setAdding(true)}
+            className="rounded-md bg-accent px-3.5 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+            + Add connection
+          </button>
+        )}
+      </div>
 
       {justConnected && (
         <div className="mb-4 rounded-lg border border-good bg-good/10 px-4 py-2.5 text-sm font-semibold text-good">
@@ -144,17 +155,82 @@ export function ConnectionsPage() {
         </Card>
       ))}
 
-      {isAdmin ? (
+      {(connections.data ?? []).length === 0 && !connections.isLoading && (
+        <p className="mb-3 text-sm text-mut">No connections yet — add your Etsy shop to start syncing.</p>
+      )}
+      {!isAdmin && <p className="text-sm text-mut">Settings are managed by admins.</p>}
+
+      {isAdmin && (
         <>
+          <h2 className="mt-8 mb-3 text-[13px] font-bold tracking-widest text-ink2 uppercase">Fulfillment</h2>
           <SlipSettings />
-          <ConnectEtsy />
-          {!(connections.data ?? []).some((c) => c.platform === "usps" && c.status !== "disconnected") && <ConnectUsps />}
+          <h2 className="mt-8 mb-3 text-[13px] font-bold tracking-widest text-ink2 uppercase">Costs</h2>
+          <LaborRateSettings />
         </>
-      ) : (
-        <p className="text-sm text-mut">Storefront connections are managed by admins.</p>
+      )}
+
+      {adding && isAdmin && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/35" onClick={() => setAdding(false)} />
+          <div className="fixed inset-x-0 top-10 z-50 mx-auto max-h-[85vh] w-[min(640px,94vw)] overflow-y-auto rounded-2xl border border-line bg-bg p-5 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <b className="text-[15px]">Add a connection</b>
+              <button onClick={() => setAdding(false)} className="rounded-md border border-line px-2 py-0.5 text-xs text-ink2 hover:text-ink">✕</button>
+            </div>
+            <div className="mb-4 flex gap-2">
+              {(["etsy", "usps"] as const).map((p) => (
+                <button key={p} type="button" onClick={() => setAddPlatform(p)}
+                  className={`rounded-lg border px-4 py-2 text-sm font-semibold capitalize ${addPlatform === p ? "border-accent text-accent" : "border-line text-ink2 hover:border-accent"}`}>
+                  {p === "etsy" ? "Etsy shop" : "USPS (shipping)"}
+                </button>
+              ))}
+            </div>
+            {addPlatform === "etsy" && <ConnectEtsy />}
+            {addPlatform === "usps" && (
+              (connections.data ?? []).some((c) => c.platform === "usps" && c.status !== "disconnected")
+                ? <p className="text-sm text-mut">A USPS connection already exists — configure it on its card.</p>
+                : <ConnectUsps onDone={() => setAdding(false)} />
+            )}
+          </div>
+        </>
       )}
       </div>
     </AppShell>
+  );
+}
+
+/** Global labor rate ($/hr) — drives recipe costs and order labor lines. */
+function LaborRateSettings() {
+  const [rate, setRate] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    fetch("/api/v1/catalog/labor-rate").then((r) => r.json())
+      .then((r) => setRate((r.rateMinor / 100).toFixed(2))).catch(() => setRate(""));
+  }, []);
+  const save = useMutation({
+    mutationFn: () =>
+      fetch("/api/v1/catalog/labor-rate", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rateMinor: Math.round(parseFloat(rate || "0") * 100) }),
+      }).then((r) => { if (!r.ok) throw new Error(r.statusText); }),
+    onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2000); },
+  });
+  if (rate === null) return null;
+  return (
+    <Card>
+      <h2 className="text-sm font-semibold">Labor rate</h2>
+      <p className="mt-1 text-xs text-mut">Per hour — drives recipe costs and each order's labor line.</p>
+      <div className="mt-2 flex items-center gap-2">
+        $<input value={rate} onChange={(e) => setRate(e.target.value)}
+          className="w-24 rounded-md border border-line bg-panel2 px-3 py-1.5 text-right font-mono text-sm outline-none focus:border-accent" />
+        <span className="text-xs text-mut">/ hr</span>
+        <button type="button" onClick={() => save.mutate()} disabled={save.isPending}
+          className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        {saved && <span className="text-xs text-good">Saved.</span>}
+      </div>
+    </Card>
   );
 }
 
@@ -174,7 +250,7 @@ function SlipSettings() {
   });
   if (text === null) return null;
   return (
-    <Card className="mt-2 mb-3">
+    <Card>
       <h2 className="text-sm font-semibold">Packing slip footer</h2>
       <p className="mt-1 text-xs text-mut">Printed at the bottom of every packing slip.</p>
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2}
@@ -224,7 +300,7 @@ function UspsConfig({ c }: { c: Connection }) {
   );
 }
 
-function ConnectUsps() {
+function ConnectUsps({ onDone }: { onDone?: () => void }) {
   const queryClient = useQueryClient();
   const [key, setKey] = useState("");
   const [secret, setSecret] = useState("");
@@ -236,7 +312,7 @@ function ConnectUsps() {
         method: "POST",
         body: JSON.stringify({ consumerKey: key, consumerSecret: secret, originZip: zip, mailClass }),
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["connections"] }); onDone?.(); },
   });
   return (
     <Card className="mt-3">

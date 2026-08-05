@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ClipboardList, Hammer, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plug, Tags, X } from "lucide-react";
+import { Boxes, ClipboardList, Hammer, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, Tags, X } from "lucide-react";
 import { api } from "./api";
 
 /** Minimal primitives in the concept's visual language; the full shadcn/ui
@@ -79,35 +79,6 @@ export function ErrorText({ children }: { children: ReactNode }) {
   return children ? <p className="text-sm font-medium text-crit">{children}</p> : null;
 }
 
-const TABS = [
-  ["Inventory", "/"],
-  ["Products", "/products"],
-  ["Listings", "/listings"],
-  ["Orders", "/orders"],
-  ["Connections", "/connections"],
-] as const;
-
-/** Segmented nav per the locked concept header: padded targets, active pane. */
-export function NavTabs({ active }: { active: (typeof TABS)[number][0] }) {
-  return (
-    <nav className="flex gap-0.5 rounded-lg border border-line bg-panel2 p-0.5">
-      {TABS.map(([label, to]) => (
-        <Link
-          key={to}
-          to={to}
-          aria-current={active === label ? "page" : undefined}
-          className={`rounded-md px-3.5 py-1.5 text-sm transition-colors ${
-            active === label
-              ? "bg-panel font-semibold text-ink shadow-sm"
-              : "text-ink2 hover:bg-panel/60 hover:text-ink"
-          }`}
-        >
-          {label}
-        </Link>
-      ))}
-    </nav>
-  );
-}
 
 
 /* ---------- App shell: left sidebar + content header (desktop-first,
@@ -118,7 +89,7 @@ const NAV = [
   { label: "Products", to: "/products", Icon: Hammer },
   { label: "Listings", to: "/listings", Icon: Tags },
   { label: "Orders", to: "/orders", Icon: ClipboardList },
-  { label: "Connections", to: "/connections", Icon: Plug },
+  { label: "Settings", to: "/settings", Icon: Settings },
 ] as const;
 export type NavLabel = (typeof NAV)[number]["label"];
 

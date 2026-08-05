@@ -14,7 +14,7 @@ import { LoginPage } from "./pages/Login";
 import { DashboardPage } from "./pages/Dashboard";
 import { ProductsPage } from "./pages/Products";
 import { ListingsPage } from "./pages/Listings";
-import { ConnectionsPage } from "./pages/Connections";
+import { SettingsPage } from "./pages/Settings";
 import { OrdersPage } from "./pages/Orders";
 import { ImportEtsyPage } from "./pages/ImportEtsy";
 
@@ -66,14 +66,21 @@ const importEtsyRoute = createRoute({
   component: ImportEtsyPage,
 });
 
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: SettingsPage,
+});
+
+// OAuth callbacks still redirect to /connections — same page, old address.
 const connectionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/connections",
-  component: ConnectionsPage,
+  component: SettingsPage,
 });
 
 const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, setupRoute, loginRoute, productsRoute, listingsRoute, importEtsyRoute, ordersRoute, connectionsRoute]),
+  routeTree: rootRoute.addChildren([indexRoute, setupRoute, loginRoute, productsRoute, listingsRoute, importEtsyRoute, ordersRoute, settingsRoute, connectionsRoute]),
 });
 
 declare module "@tanstack/react-router" {

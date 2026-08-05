@@ -125,7 +125,7 @@ export function ImportEtsyPage() {
           </div>
           {!conn && !connections.isLoading && (
             <p className="py-4 text-sm text-ink2">
-              No connected Etsy shop{connections.isError ? ` — couldn't load connections (${errText(connections.error)})` : ""}. Connect one on the Connections tab first.
+              No connected Etsy shop{connections.isError ? ` — couldn't load connections (${errText(connections.error)})` : ""}. Connect one in Settings first.
             </p>
           )}
           {listings.isError && (
