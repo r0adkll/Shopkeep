@@ -62,8 +62,12 @@ object FilamentCatalogTable : Table("filament_catalog") {
     val dataSheetUrl = text("data_sheet_url").nullable()
     val discontinued = bool("discontinued")
     val sizes = jsonb<List<CatalogSize>>("sizes", Json.Default)
+    val links = jsonb<List<CatalogLink>>("links", Json.Default)
     override val primaryKey = PrimaryKey(variantId)
 }
+
+@Serializable
+data class CatalogLink(val url: String, val store: String, val shipsFrom: List<String> = emptyList())
 
 @Serializable
 data class CatalogSize(
@@ -85,6 +89,7 @@ data class CatalogFilament(
     val dataSheetUrl: String?,
     val discontinued: Boolean,
     val sizes: List<CatalogSize>,
+    val links: List<CatalogLink> = emptyList(),
 )
 
 @Serializable
@@ -122,11 +127,22 @@ data class CatalogStatus(
     val discontinued: Boolean = false,
 )
 @Serializable private data class OfdSize(
+    val id: String,
     val variant_id: String,
     val filament_weight: Double? = null,
     val empty_spool_weight: Double? = null,
     val spool_refill: Boolean = false,
     val article_number: String? = null,
+)
+@Serializable private data class OfdStore(
+    val id: String,
+    val name: String,
+    val ships_from: List<String> = emptyList(),
+)
+@Serializable private data class OfdPurchaseLink(
+    val store_id: String,
+    val size_id: String,
+    val url: String,
 )
 @Serializable private data class OfdDump(
     val version: String? = null,
@@ -134,6 +150,8 @@ data class CatalogStatus(
     val filaments: List<OfdFilament> = emptyList(),
     val variants: List<OfdVariant> = emptyList(),
     val sizes: List<OfdSize> = emptyList(),
+    val stores: List<OfdStore> = emptyList(),
+    val purchase_links: List<OfdPurchaseLink> = emptyList(),
 )
 
 private val dumpJson = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -178,6 +196,16 @@ class FilamentCatalogRepository(private val http: HttpClient) {
             list.map { CatalogSize(it.filament_weight, it.empty_spool_weight, it.spool_refill, it.article_number) }
                 .distinctBy { Triple(it.weightGrams, it.refill, it.spoolWeightGrams) }
         }
+        val storeById = dump.stores.associateBy { it.id }
+        val variantBySize = dump.sizes.associate { it.id to it.variant_id }
+        val linksByVariant = dump.purchase_links
+            .mapNotNull { pl ->
+                val variantId = variantBySize[pl.size_id] ?: return@mapNotNull null
+                val store = storeById[pl.store_id] ?: return@mapNotNull null
+                variantId to CatalogLink(pl.url, store.name, store.ships_from)
+            }
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, ls) -> ls.distinctBy { it.url }.take(12) }
 
         val rows = dump.variants.mapNotNull { v ->
             val line = lineById[v.filament_id] ?: return@mapNotNull null
@@ -193,6 +221,7 @@ class FilamentCatalogRepository(private val http: HttpClient) {
                 dataSheetUrl = line.data_sheet_url,
                 discontinued = v.discontinued || line.discontinued,
                 sizes = sizesByVariant[v.id] ?: emptyList(),
+                links = linksByVariant[v.id] ?: emptyList(),
             )
         }.distinctBy { it.variantId }
 
@@ -209,6 +238,7 @@ class FilamentCatalogRepository(private val http: HttpClient) {
                 this[FilamentCatalogTable.dataSheetUrl] = r.dataSheetUrl
                 this[FilamentCatalogTable.discontinued] = r.discontinued
                 this[FilamentCatalogTable.sizes] = r.sizes
+                this[FilamentCatalogTable.links] = r.links
             }
             dump.version?.let { v -> SettingsTable.upsert { it[key] = VERSION_KEY; it[value] = v } }
             SettingsTable.upsert { it[key] = REFRESHED_KEY; it[value] = OffsetDateTime.now().toString() }
@@ -258,6 +288,7 @@ class FilamentCatalogRepository(private val http: HttpClient) {
                     dataSheetUrl = row[FilamentCatalogTable.dataSheetUrl],
                     discontinued = row[FilamentCatalogTable.discontinued],
                     sizes = row[FilamentCatalogTable.sizes],
+                    links = row[FilamentCatalogTable.links],
                 )
             }
     }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { ShoppingCart, X } from "lucide-react";
 import { inventoryApi, type CatalogFilament } from "./api";
 
 /** Browse the Open Filament Database mirror: search across brand / line /
@@ -137,6 +137,11 @@ export function FilamentCatalogDialog({
                   <span className="ml-1.5 rounded-full bg-line/60 px-1.5 py-0.5 text-[8.5px] font-extrabold tracking-wider text-mut">DISCONTINUED</span>
                 )}
               </span>
+              {f.links.length > 0 && (
+                <span className="flex flex-none items-center gap-0.5 text-[10px] text-mut" title={`${f.links.length} store link${f.links.length > 1 ? "s" : ""}`}>
+                  <ShoppingCart size={10} />{f.links.length}
+                </span>
+              )}
               <span className="flex-none text-[11px] text-mut">{f.material}</span>
               <span className="w-24 flex-none truncate text-right text-[11px] text-ink2">{f.brand}</span>
             </button>

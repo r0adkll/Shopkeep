@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HexColorPicker } from "react-colorful";
-import { inventoryApi, type CatalogFilament, type Material, type MaterialInput } from "./api";
+import { bestCatalogLink, inventoryApi, type CatalogFilament, type Material, type MaterialInput } from "./api";
 import { FilamentCatalogDialog } from "./FilamentCatalogDialog";
 import { Button, ErrorText, Field } from "../ui";
 
@@ -262,8 +262,10 @@ export function MaterialForm({
       (f.material === "PLA" ? "PLA Basic" : knownTypes.find((t) => t === f.material)) ??
       f.line;
     if (!knownTypes.includes(type)) setCustomType(true);
+    const link = bestCatalogLink(f);
     setM((prev) => ({
       ...prev,
+      vendorUrl: prev.vendorUrl || link?.url || null,
       name: prev.name || `${f.colorName} ${f.line}`,
       brand: prev.brand || f.brand,
       category: prev.category || "filament",
@@ -279,7 +281,9 @@ export function MaterialForm({
       },
     }));
     if (f.colorHex && !color) setColor(f.colorHex);
-    setPrefillNote(`From catalog: ${f.brand} ${f.line} — ${f.colorName}${f.discontinued ? " (discontinued)" : ""}`);
+    setPrefillNote(
+      `From catalog: ${f.brand} ${f.line} — ${f.colorName}${f.discontinued ? " (discontinued)" : ""}${link ? ` · vendor link: ${link.store}` : ""}`,
+    );
     setBrowsing(false);
   };
 

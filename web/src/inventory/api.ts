@@ -63,6 +63,8 @@ export type CatalogSize = {
   articleNumber: string | null;
 };
 
+export type CatalogLink = { url: string; store: string; shipsFrom: string[] };
+
 export type CatalogFilament = {
   variantId: string;
   brand: string;
@@ -74,7 +76,24 @@ export type CatalogFilament = {
   dataSheetUrl: string | null;
   discontinued: boolean;
   sizes: CatalogSize[];
+  links: CatalogLink[];
 };
+
+/** Best buy-link for a variant: the brand's own store wins, then a store
+ *  shipping from the viewer's region (browser locale), then whatever's first. */
+export function bestCatalogLink(f: CatalogFilament): CatalogLink | null {
+  if (f.links.length === 0) return null;
+  const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const brand = squash(f.brand);
+  const region = (() => {
+    try { return new Intl.Locale(navigator.language).region ?? null; } catch { return null; }
+  })();
+  return (
+    f.links.find((l) => squash(l.store).includes(brand) || squash(l.url).includes(brand)) ??
+    (region ? f.links.find((l) => l.shipsFrom.includes(region)) : null) ??
+    f.links[0]
+  );
+}
 
 export type CatalogFacet = { name: string; variants: number };
 export type CatalogFacets = { brands: CatalogFacet[]; materials: CatalogFacet[] };
