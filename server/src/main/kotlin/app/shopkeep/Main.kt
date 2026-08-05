@@ -15,6 +15,7 @@ import app.shopkeep.integrations.mockEtsyRoutes
 import app.shopkeep.listings.listingRoutes
 import app.shopkeep.inventory.inventoryRoutes
 import app.shopkeep.inventory.vendorPrefillRoutes
+import app.shopkeep.fulfillment.packingSlipRoutes
 import app.shopkeep.config.AppConfig
 import app.shopkeep.db.connectExposed
 import app.shopkeep.db.createDataSource
@@ -100,6 +101,12 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
         }
     }
 
+    // Icon caching writes documents through the connections layer without a
+    // hard dependency (vault: Architecture seams).
+    graph.connectionRepository.documentsSaver = { kind, ct, name, bytes ->
+        graph.documentRepository.save(kind, ct, name, bytes)
+    }
+
     // Background storefront poll (vault: Architecture sync loop). Failures log; never crash.
     launch {
         delay(30_000)
@@ -120,6 +127,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             oidcRoutes(graph.oidcService, graph.userRepository)
             inventoryRoutes(graph.materialRepository)
             vendorPrefillRoutes(graph.vendorPrefillService)
+            packingSlipRoutes(graph.packingSlipService)
             catalogRoutes(graph.productRepository)
             documentRoutes(graph.documentRepository)
             listingRoutes(graph.listingRepository)

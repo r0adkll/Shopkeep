@@ -370,6 +370,8 @@ function OrderDetailPanel(props: {
   });
   const [matching, setMatching] = useState<OrderLine | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
+  const [slipNote, setSlipNote] = useState(false);
+  const slipUrl = (note: boolean) => `/api/v1/orders/${orderId}/packing-slip.pdf${note ? "?note=1" : ""}`;
   const [reresolveErr, setReresolveErr] = useState<string | null>(null);
   const reresolve = useMutation({
     mutationFn: (lineId: number) => jsonFetch(`/api/v1/orders/lines/${lineId}/reresolve`, { method: "POST" }),
@@ -738,8 +740,8 @@ function OrderDetailPanel(props: {
               {d.shipments[0]?.labelCostMinor != null && (
                 <span className="text-xs text-ink2">label <b className="font-mono">{money(d.shipments[0].labelCostMinor)}</b></span>
               )}
-              <button disabled title="packing slip printing arrives with the next build step"
-                className="ml-auto rounded-md border border-line px-3 py-1 text-xs font-semibold text-mut">
+              <button onClick={() => window.open(slipUrl(false), "_blank")}
+                className="ml-auto rounded-md border border-accent/40 px-3 py-1 text-xs font-semibold text-accent hover:bg-accent/5">
                 🖨 Packing slip
               </button>
             </>
@@ -774,7 +776,23 @@ function OrderDetailPanel(props: {
               )}
               <div className="border-t border-dotted border-line py-2.5">
                 <b className="text-[13px]">1 · Packing slip</b>
-                <span className="ml-2 text-[11px] text-mut">printing arrives with the next build step</span>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <button onClick={() => window.open(slipUrl(slipNote), "_blank")}
+                    className="flex items-center gap-1 rounded-md border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/5">
+                    🖨 Print slip
+                  </button>
+                  <button onClick={() => window.open(slipUrl(slipNote), "_blank")}
+                    className="rounded-md border border-line px-2 py-1 text-xs font-semibold text-ink2 hover:border-accent hover:text-accent">
+                    preview
+                  </button>
+                  {!d.isGift && (
+                    <label className="flex items-center gap-1.5 text-[11px] text-ink2">
+                      <input type="checkbox" checked={slipNote} onChange={(e) => setSlipNote(e.target.checked)} className="accent-accent" />
+                      include private note
+                    </label>
+                  )}
+                  <span className="text-[11px] text-mut">opens the PDF — direct IPP printing arrives with the printer step</span>
+                </div>
               </div>
               <div className="border-t border-dotted border-line py-2.5">
                 <b className="text-[13px]">2 · Buy &amp; print the label on Etsy</b>

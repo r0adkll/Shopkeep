@@ -150,6 +150,7 @@ export function ConnectionsPage() {
 
       {isAdmin ? (
         <>
+          <SlipSettings />
           <ConnectEtsy />
           {!(connections.data ?? []).some((c) => c.platform === "usps" && c.status !== "disconnected") && <ConnectUsps />}
         </>
@@ -157,6 +158,38 @@ export function ConnectionsPage() {
         <p className="text-sm text-mut">Storefront connections are managed by admins.</p>
       )}
     </div>
+  );
+}
+
+/** Fulfillment settings (locked ship concept): the slip's footer message. */
+function SlipSettings() {
+  const [text, setText] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    fetch("/api/v1/fulfillment/slip-footer").then((r) => r.json()).then((r) => setText(r.text)).catch(() => setText(""));
+  }, []);
+  const save = useMutation({
+    mutationFn: () =>
+      fetch("/api/v1/fulfillment/slip-footer", {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      }).then((r) => { if (!r.ok) throw new Error(r.statusText); }),
+    onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2000); },
+  });
+  if (text === null) return null;
+  return (
+    <Card className="mt-2 mb-3">
+      <h2 className="text-sm font-semibold">Packing slip footer</h2>
+      <p className="mt-1 text-xs text-mut">Printed at the bottom of every packing slip.</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2}
+        className="mt-2 w-full rounded-md border border-line bg-panel2 px-3 py-2 text-sm outline-none focus:border-accent" />
+      <div className="mt-2 flex items-center gap-3">
+        <button type="button" onClick={() => save.mutate()} disabled={save.isPending}
+          className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+          {save.isPending ? "Saving…" : "Save"}
+        </button>
+        {saved && <span className="text-xs text-good">Saved.</span>}
+      </div>
+    </Card>
   );
 }
 

@@ -175,6 +175,13 @@ data class EtsyShopListing(
 data class EtsyShopListings(val count: Int = 0, val results: List<EtsyShopListing> = emptyList())
 
 @Serializable
+data class EtsyShopInfo(
+    @SerialName("shop_name") val shopName: String = "",
+    @SerialName("icon_url_fullxfull") val iconUrl: String? = null,
+    @SerialName("url") val url: String? = null,
+)
+
+@Serializable
 data class EtsyShipment(
     @SerialName("receipt_shipping_id") val receiptShippingId: Long? = null,
     @SerialName("shipment_notification_timestamp") val notificationTimestamp: Long = 0,
@@ -607,6 +614,29 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         }
         return all
     }
+
+    /** Shop icon for slips/branding: fetched once, cached as a document id in
+     *  the connection config; re-fetched only if the doc vanished. */
+    suspend fun shopIconDocId(connectionId: Long): Long? {
+        val row = dbQuery { ConnectionsTable.selectAll().where { ConnectionsTable.id eq connectionId }.singleOrNull() } ?: return null
+        row[ConnectionsTable.config]?.get("shopIconDoc")?.toLongOrNull()?.let { return it }
+        val c = creds(connectionId) ?: return null
+        val shop = runCatching {
+            etsyGet<EtsyShopInfo>("$apiBase/shops/${c.shopId}", c.keystring, c.secret, c.access)
+        }.getOrNull() ?: return null
+        val url = shop.iconUrl ?: return null
+        val bytes = download(url) ?: return null
+        val docId = documentsSaver?.invoke("shop-icon", "image/png", "shop-icon.png", bytes) ?: return null
+        dbQuery {
+            ConnectionsTable.update({ ConnectionsTable.id eq connectionId }) {
+                it[config] = (row[ConnectionsTable.config] ?: emptyMap()) + ("shopIconDoc" to docId.toString())
+            }
+        }
+        return docId
+    }
+
+    /** Set by AppGraph wiring to avoid a circular dependency on documents. */
+    var documentsSaver: (suspend (kind: String, contentType: String, filename: String?, bytes: ByteArray) -> Long)? = null
 
     /** One receipt with transactions — rematch backfill for early-ingest lines. */
     suspend fun fetchReceipt(connectionId: Long, receiptId: String): EtsyReceipt? {
