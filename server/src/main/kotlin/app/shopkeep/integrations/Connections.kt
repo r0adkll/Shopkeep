@@ -23,6 +23,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.andWhere
 import org.jetbrains.exposed.sql.json.jsonb
@@ -755,7 +756,11 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
     }
 
     suspend fun connectedIds(platform: String = "etsy"): List<Long> = dbQuery {
-        ConnectionsTable.selectAll().where { ConnectionsTable.status eq "connected" }
+        // 'error' included deliberately: every fetch path re-verifies first,
+        // so a transient failure (network timeout mid-refresh) self-heals on
+        // the next poll instead of bricking the connection until a human
+        // clicks Verify.
+        ConnectionsTable.selectAll().where { ConnectionsTable.status inList listOf("connected", "error") }
             .andWhere { ConnectionsTable.platform eq platform }
             .map { it[ConnectionsTable.id] }
     }

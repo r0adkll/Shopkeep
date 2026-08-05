@@ -780,13 +780,13 @@ function OrderDetailPanel(props: {
                 <b className="text-[13px]">2 · Buy &amp; print the label on Etsy</b>
                 <div className="mt-1.5 flex items-center gap-2">
                   <a
-                    href={`https://www.etsy.com/your/orders/sold?order_id=${o.platformOrderId}`}
+                    href={`https://www.etsy.com/your/orders/sold/${o.platformOrderId}/ship?order_id=${o.platformOrderId}&search_query=${o.platformOrderId}&orders_hash=${o.platformOrderId}a`}
                     target="_blank" rel="noreferrer"
                     className="flex items-center gap-1 rounded-md border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/5"
                   >
-                    <ExternalLink size={12} /> Open on Etsy
+                    <ExternalLink size={12} /> Buy label on Etsy
                   </a>
-                  <span className="text-[11px] text-mut">buy and print the label in Shop Manager</span>
+                  <span className="text-[11px] text-mut">opens the shipping-label page directly</span>
                 </div>
               </div>
               <div className="border-t border-dotted border-line py-2.5">
