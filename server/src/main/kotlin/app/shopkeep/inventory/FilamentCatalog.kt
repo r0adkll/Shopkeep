@@ -88,7 +88,12 @@ data class CatalogFilament(
 )
 
 @Serializable
-data class CatalogBrand(val name: String, val variants: Long)
+data class CatalogFacet(val name: String, val variants: Long)
+
+/** Each facet is counted with the OTHER filter applied, so picking a brand
+ *  narrows the material list to what that brand actually makes (and back). */
+@Serializable
+data class CatalogFacets(val brands: List<CatalogFacet>, val materials: List<CatalogFacet>)
 
 @Serializable
 data class CatalogStatus(
@@ -212,10 +217,18 @@ class FilamentCatalogRepository(private val http: HttpClient) {
     }
 
     /** Token search: every token must hit brand, line, material, or color. */
-    suspend fun search(q: String, brand: String?, limit: Int = 60): List<CatalogFilament> = dbQuery {
+    suspend fun search(
+        q: String,
+        brand: String?,
+        material: String?,
+        includeDiscontinued: Boolean = true,
+        limit: Int = 60,
+    ): List<CatalogFilament> = dbQuery {
         val tokens = q.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
         var where: Op<Boolean> = Op.TRUE
         if (brand != null) where = where and (FilamentCatalogTable.brand eq brand)
+        if (material != null) where = where and (FilamentCatalogTable.material eq material)
+        if (!includeDiscontinued) where = where and (FilamentCatalogTable.discontinued eq false)
         for (t in tokens) {
             val pat = "%${t.replace("%", "\\%").replace("_", "\\_")}%"
             where = where and (
@@ -249,13 +262,21 @@ class FilamentCatalogRepository(private val http: HttpClient) {
             }
     }
 
-    suspend fun brands(): List<CatalogBrand> = dbQuery {
+    suspend fun facets(brand: String?, material: String?): CatalogFacets = dbQuery {
         val count = FilamentCatalogTable.variantId.count()
-        FilamentCatalogTable
+        val brands = FilamentCatalogTable
             .select(FilamentCatalogTable.brand, count)
+            .let { if (material != null) it.where { FilamentCatalogTable.material eq material } else it }
             .groupBy(FilamentCatalogTable.brand)
             .orderBy(FilamentCatalogTable.brand)
-            .map { CatalogBrand(it[FilamentCatalogTable.brand], it[count]) }
+            .map { CatalogFacet(it[FilamentCatalogTable.brand], it[count]) }
+        val materials = FilamentCatalogTable
+            .select(FilamentCatalogTable.material, count)
+            .let { if (brand != null) it.where { FilamentCatalogTable.brand eq brand } else it }
+            .groupBy(FilamentCatalogTable.material)
+            .orderBy(count to org.jetbrains.exposed.sql.SortOrder.DESC, FilamentCatalogTable.material to org.jetbrains.exposed.sql.SortOrder.ASC)
+            .map { CatalogFacet(it[FilamentCatalogTable.material], it[count]) }
+        CatalogFacets(brands, materials)
     }
 
     private fun setting(key: String): String? =
@@ -265,12 +286,21 @@ class FilamentCatalogRepository(private val http: HttpClient) {
 fun Route.filamentCatalogRoutes(catalog: FilamentCatalogRepository) {
     authenticate(SESSION_AUTH) {
         get("/inventory/filamentdb/status") { call.respond(catalog.status()) }
-        get("/inventory/filamentdb/brands") { call.respond(catalog.brands()) }
+        get("/inventory/filamentdb/facets") {
+            call.respond(
+                catalog.facets(
+                    brand = call.request.queryParameters["brand"]?.takeIf { it.isNotBlank() },
+                    material = call.request.queryParameters["material"]?.takeIf { it.isNotBlank() },
+                ),
+            )
+        }
         get("/inventory/filamentdb/search") {
             val q = call.request.queryParameters["q"] ?: ""
             val brand = call.request.queryParameters["brand"]?.takeIf { it.isNotBlank() }
+            val material = call.request.queryParameters["material"]?.takeIf { it.isNotBlank() }
+            val includeDiscontinued = call.request.queryParameters["discontinued"] != "false"
             val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 200) ?: 60
-            call.respond(catalog.search(q, brand, limit))
+            call.respond(catalog.search(q, brand, material, includeDiscontinued, limit))
         }
         post("/inventory/filamentdb/refresh") { call.respond(catalog.refresh()) }
     }

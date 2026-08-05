@@ -16,11 +16,18 @@ export function FilamentCatalogDialog({
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [brand, setBrand] = useState("");
+  const [material, setMaterial] = useState("");
+  const [hideDiscontinued, setHideDiscontinued] = useState(false);
   const [hi, setHi] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
   const status = useQuery({ queryKey: ["filamentdb", "status"], queryFn: inventoryApi.filamentDbStatus });
-  const brands = useQuery({ queryKey: ["filamentdb", "brands"], queryFn: inventoryApi.filamentDbBrands });
+  // Facets cross-narrow: pick a brand and the material list shrinks to what
+  // that brand actually makes, and vice versa.
+  const facets = useQuery({
+    queryKey: ["filamentdb", "facets", brand, material],
+    queryFn: () => inventoryApi.filamentDbFacets(brand || null, material || null),
+  });
   // Small debounce keeps the mirror queries calm while typing.
   const [debouncedQ, setDebouncedQ] = useState("");
   useEffect(() => {
@@ -28,9 +35,9 @@ export function FilamentCatalogDialog({
     return () => clearTimeout(t);
   }, [q]);
   const results = useQuery({
-    queryKey: ["filamentdb", "search", debouncedQ, brand],
-    queryFn: () => inventoryApi.filamentDbSearch(debouncedQ, brand || null),
-    enabled: (status.data?.variants ?? 0) > 0 && (debouncedQ.trim().length > 0 || !!brand),
+    queryKey: ["filamentdb", "search", debouncedQ, brand, material, hideDiscontinued],
+    queryFn: () => inventoryApi.filamentDbSearch(debouncedQ, { brand: brand || null, material: material || null, hideDiscontinued }),
+    enabled: (status.data?.variants ?? 0) > 0 && (debouncedQ.trim().length > 0 || !!brand || !!material),
   });
   const refresh = useMutation({
     mutationFn: inventoryApi.filamentDbRefresh,
@@ -38,7 +45,7 @@ export function FilamentCatalogDialog({
   });
 
   const rows = results.data ?? [];
-  useEffect(() => { setHi(0); }, [debouncedQ, brand]);
+  useEffect(() => { setHi(0); }, [debouncedQ, brand, material, hideDiscontinued]);
   useEffect(() => {
     listRef.current?.children[hi]?.scrollIntoView({ block: "nearest" });
   }, [hi]);
@@ -70,12 +77,27 @@ export function FilamentCatalogDialog({
             className="min-w-40 flex-1 rounded-md border border-line bg-panel2 px-3 py-1.5 text-sm outline-none placeholder:text-mut focus:border-accent"
           />
           <select value={brand} onChange={(e) => setBrand(e.target.value)}
-            className="max-w-44 rounded-md border border-line bg-panel2 px-2 py-1.5 text-xs outline-none focus:border-accent">
+            className="max-w-40 rounded-md border border-line bg-panel2 px-2 py-1.5 text-xs outline-none focus:border-accent">
             <option value="">all brands</option>
-            {(brands.data ?? []).map((b) => (
+            {(facets.data?.brands ?? []).map((b) => (
               <option key={b.name} value={b.name}>{b.name} ({b.variants})</option>
             ))}
           </select>
+          <select value={material} onChange={(e) => setMaterial(e.target.value)}
+            className="max-w-36 rounded-md border border-line bg-panel2 px-2 py-1.5 text-xs outline-none focus:border-accent">
+            <option value="">all materials</option>
+            {(facets.data?.materials ?? []).map((m) => (
+              <option key={m.name} value={m.name}>{m.name} ({m.variants})</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setHideDiscontinued((v) => !v)}
+            aria-pressed={hideDiscontinued}
+            className={`rounded-full border px-2.5 py-1 text-[10.5px] font-semibold ${hideDiscontinued ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}
+          >
+            hide discontinued
+          </button>
         </div>
 
         <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-2">
@@ -91,8 +113,8 @@ export function FilamentCatalogDialog({
           )}
           {!empty && rows.length === 0 && (
             <p className="px-2 py-6 text-center text-sm text-mut">
-              {debouncedQ.trim() || brand
-                ? results.isFetching ? "Searching…" : "Nothing matches — try fewer words."
+              {debouncedQ.trim() || brand || material
+                ? results.isFetching ? "Searching…" : "Nothing matches — try fewer words or filters."
                 : "Type to search 14,000+ colors across 150+ brands."}
             </p>
           )}

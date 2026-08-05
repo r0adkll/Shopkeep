@@ -76,7 +76,8 @@ export type CatalogFilament = {
   sizes: CatalogSize[];
 };
 
-export type CatalogBrand = { name: string; variants: number };
+export type CatalogFacet = { name: string; variants: number };
+export type CatalogFacets = { brands: CatalogFacet[]; materials: CatalogFacet[] };
 export type CatalogStatus = { version: string | null; refreshedAt: string | null; variants: number };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -120,9 +121,17 @@ export const inventoryApi = {
       body: JSON.stringify({ delta, kind, note }),
     }),
   purchasing: () => req<Material[]>("/purchasing"),
-  filamentDbSearch: (q: string, brand?: string | null) =>
-    req<CatalogFilament[]>(`/filamentdb/search?q=${encodeURIComponent(q)}${brand ? `&brand=${encodeURIComponent(brand)}` : ""}`),
-  filamentDbBrands: () => req<CatalogBrand[]>("/filamentdb/brands"),
+  filamentDbSearch: (q: string, f: { brand?: string | null; material?: string | null; hideDiscontinued?: boolean }) =>
+    req<CatalogFilament[]>(
+      `/filamentdb/search?q=${encodeURIComponent(q)}` +
+        (f.brand ? `&brand=${encodeURIComponent(f.brand)}` : "") +
+        (f.material ? `&material=${encodeURIComponent(f.material)}` : "") +
+        (f.hideDiscontinued ? "&discontinued=false" : ""),
+    ),
+  filamentDbFacets: (brand?: string | null, material?: string | null) =>
+    req<CatalogFacets>(
+      `/filamentdb/facets?${brand ? `brand=${encodeURIComponent(brand)}&` : ""}${material ? `material=${encodeURIComponent(material)}` : ""}`,
+    ),
   filamentDbStatus: () => req<CatalogStatus>("/filamentdb/status"),
   filamentDbRefresh: () => req<CatalogStatus>("/filamentdb/refresh", { method: "POST" }),
 };
