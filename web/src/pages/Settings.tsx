@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { AppShell, Card, ErrorText, Field } from "../ui";
-import etsyLogo from "../assets/etsy.svg";
-import uspsLogo from "../assets/usps.svg";
+import etsyLogo from "../assets/etsy-icon.png";
+import uspsLogo from "../assets/usps-icon.png";
 
 type Capabilities = { maxPhotos: number; maxVariationAxes: number; skuOnAllAxes: boolean };
 type Connection = {
@@ -117,11 +117,11 @@ export function SettingsPage() {
       {(connections.data ?? []).map((c) => (
         <Card key={c.id} className="mb-3">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="flex h-10 w-20 flex-none items-center justify-center rounded-lg border border-line bg-white px-2 py-1.5" aria-label={BRAND[c.platform]?.name ?? c.platform}>
+            <span className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-lg border border-line bg-white" aria-label={BRAND[c.platform]?.name ?? c.platform}>
               {BRAND[c.platform] ? (
-                <img src={BRAND[c.platform].logo} alt="" className="max-h-full max-w-full" />
+                <img src={BRAND[c.platform].logo} alt="" className="h-full w-full object-contain" />
               ) : (
-                <span className="text-sm font-bold capitalize">{c.platform}</span>
+                <span className="text-sm font-bold capitalize">{c.platform[0]}</span>
               )}
             </span>
             {c.shopName && <span className="text-[15px] font-semibold text-ink">{c.shopName}</span>}
@@ -196,8 +196,8 @@ export function SettingsPage() {
                 <button key={p} type="button" onClick={() => setAddPlatform(p)}
                   className={`flex items-center gap-2.5 rounded-lg border px-4 py-2 text-sm font-semibold ${addPlatform === p ? "text-ink" : "border-line text-ink2 hover:text-ink"}`}
                   style={addPlatform === p ? { borderColor: BRAND[p].bg, boxShadow: `inset 0 0 0 1px ${BRAND[p].bg}` } : undefined}>
-                  <span className="flex h-8 w-16 items-center justify-center rounded-md border border-line bg-white px-1.5 py-1">
-                    <img src={BRAND[p].logo} alt="" className="max-h-full max-w-full" />
+                  <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-md border border-line bg-white">
+                    <img src={BRAND[p].logo} alt="" className="h-full w-full object-contain" />
                   </span>
                   {p === "etsy" ? "Etsy shop" : "USPS shipping"}
                 </button>
