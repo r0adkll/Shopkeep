@@ -61,9 +61,33 @@ export function Button({
   );
 }
 
+/** The Keeper — locked logo mark (Design Process, 2026-08-05): 96-grid
+ *  stroke-vector barkeep, weight 6, lenses-only spectacles, handlebar,
+ *  bowtie. currentColor so tiles/tints control it. */
+export function KeeperMark({ size = 24, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg viewBox="0 0 96 96" width={size} height={size} className={className} aria-hidden="true"
+      fill="none" stroke="currentColor" strokeWidth={6} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M28 40a20 20 0 0 1 40 0" />
+      <path d="M28 40v4M68 40v4" />
+      <circle cx="38" cy="43.5" r="8" />
+      <circle cx="58" cy="43.5" r="8" />
+      <path d="M45.6 43.5h4.8" />
+      <path d="M48 61c-5.5-3.4-12.3-2.5-15.8 1.7 3.7 3.4 11.2 2.8 15.8-1.7Z" />
+      <path d="M48 61c5.5-3.4 12.3-2.5 15.8 1.7-3.7 3.4-11.2 2.8-15.8-1.7Z" />
+      <path d="M16 90.5c0-10.5 9.5-16 23-17.5" />
+      <path d="M80 90.5c0-10.5-9.5-16-23-17.5" />
+      <path d="M48 78l-9-4.7v9.4zM48 78l9-4.7v9.4z" />
+    </svg>
+  );
+}
+
 export function Wordmark() {
   return (
-    <div className="flex items-baseline gap-2.5">
+    <div className="flex items-center gap-2.5">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white">
+        <KeeperMark size={24} />
+      </span>
       <span className="font-display text-xl font-bold tracking-widest uppercase">Shopkeep</span>
     </div>
   );
@@ -120,7 +144,9 @@ export function AppShell({ active, title, actions, children }: {
   const sidebarInner = (mini: boolean) => (
     <>
       <div className={`flex items-center gap-2.5 py-5 ${mini ? "justify-center px-0" : "px-5"}`}>
-        <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-accent font-display text-[15px] font-bold text-white">S</span>
+        <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-accent text-white">
+          <KeeperMark size={24} />
+        </span>
         {!mini && <span className="font-display text-[15px] font-bold tracking-widest uppercase">Shopkeep</span>}
       </div>
       <nav className={`flex-1 space-y-0.5 ${mini ? "px-2" : "px-3"}`}>
