@@ -1,5 +1,8 @@
-import type { ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
+import { useState, type ReactNode } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Boxes, ClipboardList, Hammer, Menu, Plug, Tags, X } from "lucide-react";
+import { api } from "./api";
 
 /** Minimal primitives in the concept's visual language; the full shadcn/ui
  *  design-system pass lands with Phase 1 (vault: Design Process). */
@@ -103,5 +106,106 @@ export function NavTabs({ active }: { active: (typeof TABS)[number][0] }) {
         </Link>
       ))}
     </nav>
+  );
+}
+
+
+/* ---------- App shell: left sidebar + content header (desktop-first,
+ * dashboard-01 style; drawer on mobile). Pages pass their header actions. */
+
+const NAV = [
+  { label: "Inventory", to: "/", Icon: Boxes },
+  { label: "Products", to: "/products", Icon: Hammer },
+  { label: "Listings", to: "/listings", Icon: Tags },
+  { label: "Orders", to: "/orders", Icon: ClipboardList },
+  { label: "Connections", to: "/connections", Icon: Plug },
+] as const;
+export type NavLabel = (typeof NAV)[number]["label"];
+
+export function AppShell({ active, title, actions, children }: {
+  active: NavLabel;
+  title?: string;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  const [drawer, setDrawer] = useState(false);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const me = useQuery({ queryKey: ["me"], queryFn: api.me });
+  const logout = useMutation({
+    mutationFn: api.logout,
+    onSuccess: () => {
+      queryClient.removeQueries();
+      navigate({ to: "/login" });
+    },
+  });
+
+  const sidebarInner = (
+    <>
+      <div className="flex items-center gap-2.5 px-5 py-5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent font-display text-[15px] font-bold text-white">S</span>
+        <span className="font-display text-[15px] font-bold tracking-widest uppercase">Shopkeep</span>
+      </div>
+      <nav className="flex-1 space-y-0.5 px-3">
+        {NAV.map(({ label, to, Icon }) => (
+          <Link
+            key={to}
+            to={to}
+            onClick={() => setDrawer(false)}
+            aria-current={active === label ? "page" : undefined}
+            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
+              active === label ? "bg-panel2 font-semibold text-ink" : "text-ink2 hover:bg-panel2/60 hover:text-ink"
+            }`}
+          >
+            <Icon size={17} className={active === label ? "text-accent" : "text-mut"} />
+            {label}
+          </Link>
+        ))}
+      </nav>
+      <div className="border-t border-line px-5 py-4 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-ink2">{me.data?.displayName ?? ""}</span>
+          {me.data && (
+            <span className="rounded-full border border-line px-2 py-0.5 text-[10px] tracking-wider text-mut uppercase">
+              {me.data.role.toLowerCase()}
+            </span>
+          )}
+        </div>
+        <button type="button" onClick={() => logout.mutate()} className="mt-1.5 text-xs text-accent hover:underline">
+          Sign out
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex min-h-screen">
+      {/* desktop sidebar */}
+      <aside className="sticky top-0 hidden h-screen w-60 flex-none flex-col border-r border-line bg-panel lg:flex">
+        {sidebarInner}
+      </aside>
+
+      {/* mobile drawer */}
+      {drawer && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/35 lg:hidden" onClick={() => setDrawer(false)} />
+          <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-line bg-panel shadow-2xl lg:hidden">
+            <button type="button" onClick={() => setDrawer(false)}
+              className="absolute top-4 right-3 rounded-md border border-line p-1 text-ink2"><X size={15} /></button>
+            {sidebarInner}
+          </aside>
+        </>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 flex flex-wrap items-center gap-3 border-b border-line bg-bg/90 px-4 py-3 backdrop-blur lg:px-8">
+          <button type="button" onClick={() => setDrawer(true)}
+            className="rounded-md border border-line p-1.5 text-ink2 lg:hidden"><Menu size={17} /></button>
+          <h1 className="text-[15px] font-bold">{title ?? active}</h1>
+          <div className="ml-auto flex flex-wrap items-center gap-3">{actions}</div>
+        </header>
+        <main className="flex-1 px-4 py-6 lg:px-8">{children}</main>
+      </div>
+    </div>
   );
 }

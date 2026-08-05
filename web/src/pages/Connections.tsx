@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { Card, ErrorText, Field, Wordmark, NavTabs } from "../ui";
+import { AppShell, Card, ErrorText, Field } from "../ui";
 
 type Capabilities = { maxPhotos: number; maxVariationAxes: number; skuOnAllAxes: boolean };
 type Connection = {
@@ -81,12 +81,8 @@ export function ConnectionsPage() {
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
 
   return (
-    <div className="mx-auto max-w-4xl px-6 pb-16">
-      <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
-        <Wordmark />
-        <NavTabs active="Connections" />
-        <span className="ml-auto text-sm text-ink2">{me.data.displayName}</span>
-      </header>
+    <AppShell active="Connections">
+      <div className="mx-auto max-w-4xl">
 
       {justConnected && (
         <div className="mb-4 rounded-lg border border-good bg-good/10 px-4 py-2.5 text-sm font-semibold text-good">
@@ -157,7 +153,8 @@ export function ConnectionsPage() {
       ) : (
         <p className="text-sm text-mut">Storefront connections are managed by admins.</p>
       )}
-    </div>
+      </div>
+    </AppShell>
   );
 }
 

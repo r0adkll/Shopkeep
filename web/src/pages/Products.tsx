@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { Card, Wordmark, NavTabs } from "../ui";
+import { AppShell, Card } from "../ui";
 import { catalogApi, type Product } from "../catalog/api";
 import { ProductImage } from "../catalog/ProductImage";
 import { RecipeEditor } from "../catalog/RecipeEditor";
@@ -11,7 +11,6 @@ const money = (minor: number) => `$${(minor / 100).toFixed(2)}`;
 
 export function ProductsPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   useEffect(() => {
@@ -26,37 +25,16 @@ export function ProductsPage() {
     onSuccess: (p) => setEditing(p),
   });
 
-  const logout = useMutation({
-    mutationFn: api.logout,
-    onSuccess: () => {
-      queryClient.removeQueries();
-      navigate({ to: "/login" });
-    },
-  });
 
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
 
   return (
-    <div className="mx-auto max-w-6xl px-6 pb-16">
-      <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
-        <Wordmark />
-        <NavTabs active="Products" />
-        <nav className="ml-auto flex items-center gap-4 text-sm">
-          {!editing && (
-            <button
-              type="button"
-              onClick={() => setEditing("new")}
-              className="rounded-md bg-accent px-3.5 py-1.5 font-semibold text-white hover:opacity-90"
-            >
-              + Product
-            </button>
-          )}
-          <span className="text-ink2">{me.data.displayName}</span>
-          <button type="button" onClick={() => logout.mutate()} className="text-accent hover:underline">
-            Sign out
-          </button>
-        </nav>
-      </header>
+    <AppShell active="Products" actions={!editing && (
+      <button type="button" onClick={() => setEditing("new")}
+        className="rounded-md bg-accent px-3.5 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+        + Product
+      </button>
+    )}>
 
       {editing ? (
         <RecipeEditor existing={editing === "new" ? undefined : editing} onClose={() => setEditing(null)} />
@@ -114,6 +92,6 @@ export function ProductsPage() {
           </div>
         </>
       )}
-    </div>
+    </AppShell>
   );
 }

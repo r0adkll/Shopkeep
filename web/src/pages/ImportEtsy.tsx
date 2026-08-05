@@ -7,7 +7,7 @@ import { type Material, inventoryApi } from "../inventory/api";
 import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
 import { MaterialForm } from "../inventory/MaterialForm";
 import { type ProductSummary, catalogApi } from "../catalog/api";
-import { NavTabs, Skeleton, Wordmark } from "../ui";
+import { AppShell, Skeleton } from "../ui";
 
 /* Etsy import & mapping workspace per the locked concept (2026-08-02):
  * picker over live listings -> product + axis->slot link -> value grid with
@@ -102,12 +102,8 @@ export function ImportEtsyPage() {
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
 
   return (
-    <div className="mx-auto max-w-5xl px-6 pb-16">
-      <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
-        <Wordmark />
-        <NavTabs active="Listings" />
-        <span className="ml-auto text-sm text-ink2">{me.data.displayName}</span>
-      </header>
+    <AppShell active="Listings" title="Import from Etsy">
+      <div className="mx-auto max-w-5xl">
 
       {openImport ? (
         <MappingWorkspace
@@ -229,7 +225,8 @@ export function ImportEtsyPage() {
           })}
         </div>
       )}
-    </div>
+      </div>
+    </AppShell>
   );
 }
 

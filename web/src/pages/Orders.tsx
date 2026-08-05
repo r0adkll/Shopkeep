@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { ChevronLeft, ChevronRight, Copy, ExternalLink, Gift, Link2, Paperclip, RefreshCw, Settings2, X } from "lucide-react";
 import { documentUrl, uploadImage } from "../catalog/api";
-import { NavTabs, Wordmark } from "../ui";
+import { AppShell } from "../ui";
 
 /* Queue board per the locked concept (vault: Order Management / Design Process):
  * lanes are data with intake/done roles, arrival-only sentence rules,
@@ -207,28 +207,24 @@ export function OrdersPage() {
   );
 
   return (
-    <div className="mx-auto max-w-[1400px] px-6 pb-16">
-      <header className="mb-5 flex flex-wrap items-center gap-5 border-b border-line py-5">
-        <Wordmark />
-        <NavTabs active="Orders" />
+    <AppShell active="Orders" actions={
+      <>
         <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}
-          className={`ml-auto rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
+          className={`rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
           archived
         </button>
         {isAdmin && (
-          <span className="flex items-center gap-2.5">
-            <button
-              onClick={() => setEditing((e) => !e)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-sm font-semibold transition-colors ${
-                editing ? "border-accent text-accent" : "border-line text-ink2 hover:text-ink"
-              }`}
-            >
-              <Settings2 size={15} /> Customize lanes…
-            </button>
-          </span>
+          <button
+            onClick={() => setEditing((e) => !e)}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1 text-xs font-semibold transition-colors ${
+              editing ? "border-accent text-accent" : "border-line text-ink2 hover:text-ink"
+            }`}
+          >
+            <Settings2 size={14} /> Customize lanes…
+          </button>
         )}
-        <span className="text-sm text-ink2">{me.data.displayName}</span>
-      </header>
+      </>
+    }>
 
       {/* Summary strip — segmented card, no sub-captions (design system) */}
       <div className="mb-4 grid grid-cols-2 divide-line rounded-xl border border-line bg-panel shadow-sm sm:grid-cols-4 sm:divide-x">
@@ -347,7 +343,7 @@ export function OrdersPage() {
           onMove={(orderId, laneId) => move.mutate({ orderId, laneId })}
         />
       )}
-    </div>
+    </AppShell>
   );
 }
 

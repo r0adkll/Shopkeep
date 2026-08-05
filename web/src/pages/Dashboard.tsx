@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { Card, Wordmark, NavTabs } from "../ui";
+import { AppShell, Card } from "../ui";
 import {
   formatQty,
   inventoryApi,
@@ -43,13 +43,6 @@ export function DashboardPage() {
     if (me.error instanceof ApiError && me.error.status === 401) navigate({ to: "/login" });
   }, [me.error, navigate]);
 
-  const logout = useMutation({
-    mutationFn: api.logout,
-    onSuccess: () => {
-      queryClient.removeQueries();
-      navigate({ to: "/login" });
-    },
-  });
 
   const [creating, setCreating] = useState(false);
   // Deep-link from the order detail panel: /?material=<id> opens the drawer.
@@ -93,29 +86,12 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 pb-16">
-      <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
-        <Wordmark />
-        <NavTabs active="Inventory" />
-        <nav className="ml-auto flex items-center gap-4 text-sm">
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="rounded-md bg-accent px-3.5 py-1.5 font-semibold text-white hover:opacity-90"
-          >
-            + Material
-          </button>
-          <span className="text-ink2">
-            {me.data.displayName}
-            <span className="ml-1.5 rounded-full border border-line px-2 py-0.5 text-[11px] tracking-wider text-mut uppercase">
-              {me.data.role.toLowerCase()}
-            </span>
-          </span>
-          <button type="button" onClick={() => logout.mutate()} className="text-accent hover:underline">
-            Sign out
-          </button>
-        </nav>
-      </header>
+    <AppShell active="Inventory" actions={
+      <button type="button" onClick={() => setCreating(true)}
+        className="rounded-md bg-accent px-3.5 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+        + Material
+      </button>
+    }>
 
       {/* Summary strip: one segmented card, label + number only */}
       <div className="grid grid-cols-2 rounded-xl border border-line bg-panel shadow-sm sm:grid-cols-4">
@@ -289,7 +265,7 @@ export function DashboardPage() {
           onEdit={() => setEditing(all.find((m) => m.id === detailId) ?? null)}
         />
       )}
-    </div>
+    </AppShell>
   );
 }
 

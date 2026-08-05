@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { Download, ExternalLink, ImageOff, Video } from "lucide-react";
-import { Card, Wordmark, NavTabs } from "../ui";
+import { AppShell, Card } from "../ui";
 import { inventoryApi } from "../inventory/api";
 import { catalogApi, documentUrl, type Product } from "../catalog/api";
 import { listingsApi, type Listing } from "./../listings/api";
@@ -17,7 +17,6 @@ const STATE_STYLE: Record<string, string> = {
 
 export function ListingsPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   useEffect(() => {
@@ -60,40 +59,24 @@ export function ListingsPage() {
       setEditing({ product });
     },
   });
-  const logout = useMutation({
-    mutationFn: api.logout,
-    onSuccess: () => {
-      queryClient.removeQueries();
-      navigate({ to: "/login" });
-    },
-  });
 
   if (!me.data) return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
 
   return (
-    <div className="mx-auto max-w-6xl px-6 pb-16">
-      <header className="mb-6 flex flex-wrap items-center gap-5 border-b border-line py-5">
-        <Wordmark />
-        <NavTabs active="Listings" />
-        <nav className="ml-auto flex items-center gap-4 text-sm">
-          {!editing && (
-            <>
-              <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}
-                className={`rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
-                archived
-              </button>
-              <a href="/listings/import" className="flex items-center gap-1.5 rounded-md border border-line px-3.5 py-1.5 text-xs font-semibold text-ink2 hover:border-accent hover:text-accent">
-                <Download size={14} /> Import from Etsy…
-              </a>
-              <button type="button" onClick={() => setPicking(true)} className="rounded-md bg-accent px-3.5 py-1.5 font-semibold text-white hover:opacity-90">
-                + Listing
-              </button>
-            </>
-          )}
-          <span className="text-ink2">{me.data.displayName}</span>
-          <button type="button" onClick={() => logout.mutate()} className="text-accent hover:underline">Sign out</button>
-        </nav>
-      </header>
+    <AppShell active="Listings" actions={!editing && (
+      <>
+        <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}
+          className={`rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
+          archived
+        </button>
+        <a href="/listings/import" className="flex items-center gap-1.5 rounded-md border border-line px-3.5 py-1.5 text-xs font-semibold text-ink2 hover:border-accent hover:text-accent">
+          <Download size={14} /> Import from Etsy…
+        </a>
+        <button type="button" onClick={() => setPicking(true)} className="rounded-md bg-accent px-3.5 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+          + Listing
+        </button>
+      </>
+    )}>
 
       {editing ? (
         <ListingEditor existing={editing.listing} product={editing.product} onClose={() => setEditing(null)} />
@@ -124,7 +107,7 @@ export function ListingsPage() {
               </button>
             </Card>
           )}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
             {(listings.data ?? []).map((l) => {
               const SYNC: Record<string, [string, string]> = {
                 in_sync: ["IN SYNC", "bg-good/10 text-good"],
@@ -208,6 +191,6 @@ export function ListingsPage() {
           </div>
         </>
       )}
-    </div>
+    </AppShell>
   );
 }
