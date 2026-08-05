@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
 import { AppShell, Card, ErrorText, Field } from "../ui";
+import etsyLogo from "../assets/etsy.svg";
+import uspsLogo from "../assets/usps.svg";
 
 type Capabilities = { maxPhotos: number; maxVariationAxes: number; skuOnAllAxes: boolean };
 type Connection = {
@@ -39,10 +41,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Platform branding — connection cards should read at a glance. */
-const BRAND: Record<string, { bg: string; mark: string; name: string; markSize?: string }> = {
-  etsy: { bg: "#F1641E", mark: "E", name: "Etsy" },
-  usps: { bg: "#004B87", mark: "USPS", name: "USPS", markSize: "text-[8px]" },
+/** Platform branding — official marks (bundled locally, no CDN hotlinks). */
+const BRAND: Record<string, { bg: string; logo: string; name: string }> = {
+  etsy: { bg: "#F1641E", logo: etsyLogo, name: "Etsy" },
+  usps: { bg: "#004B87", logo: uspsLogo, name: "USPS" },
 };
 
 const STATUS_STYLE: Record<Connection["status"], string> = {
@@ -115,17 +117,14 @@ export function SettingsPage() {
       {(connections.data ?? []).map((c) => (
         <Card key={c.id} className="mb-3">
           <div className="flex flex-wrap items-center gap-3">
-            <span
-              className={`flex h-9 w-9 flex-none items-center justify-center rounded-lg font-bold text-white ${BRAND[c.platform]?.markSize ?? "text-[17px]"}`}
-              style={{ background: BRAND[c.platform]?.bg ?? "var(--color-mut)" }}
-              aria-hidden="true"
-            >
-              {BRAND[c.platform]?.mark ?? c.platform[0]?.toUpperCase()}
+            <span className="flex h-10 w-20 flex-none items-center justify-center rounded-lg border border-line bg-white px-2 py-1.5" aria-label={BRAND[c.platform]?.name ?? c.platform}>
+              {BRAND[c.platform] ? (
+                <img src={BRAND[c.platform].logo} alt="" className="max-h-full max-w-full" />
+              ) : (
+                <span className="text-sm font-bold capitalize">{c.platform}</span>
+              )}
             </span>
-            <span className="text-[15px] font-semibold" style={{ color: BRAND[c.platform]?.bg }}>
-              {BRAND[c.platform]?.name ?? c.platform}
-            </span>
-            {c.shopName && <span className="text-sm font-medium text-ink">{c.shopName}</span>}
+            {c.shopName && <span className="text-[15px] font-semibold text-ink">{c.shopName}</span>}
             {c.label && c.label.toLowerCase() !== c.platform && <span className="text-xs text-mut">({c.label})</span>}
             <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-wider uppercase ${STATUS_STYLE[c.status]}`}>
               {c.status}
@@ -197,8 +196,9 @@ export function SettingsPage() {
                 <button key={p} type="button" onClick={() => setAddPlatform(p)}
                   className={`flex items-center gap-2.5 rounded-lg border px-4 py-2 text-sm font-semibold ${addPlatform === p ? "text-ink" : "border-line text-ink2 hover:text-ink"}`}
                   style={addPlatform === p ? { borderColor: BRAND[p].bg, boxShadow: `inset 0 0 0 1px ${BRAND[p].bg}` } : undefined}>
-                  <span className={`flex h-7 w-7 items-center justify-center rounded-md font-bold text-white ${BRAND[p].markSize ?? "text-[14px]"}`}
-                    style={{ background: BRAND[p].bg }}>{BRAND[p].mark}</span>
+                  <span className="flex h-8 w-16 items-center justify-center rounded-md border border-line bg-white px-1.5 py-1">
+                    <img src={BRAND[p].logo} alt="" className="max-h-full max-w-full" />
+                  </span>
                   {p === "etsy" ? "Etsy shop" : "USPS shipping"}
                 </button>
               ))}
