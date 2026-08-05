@@ -3,6 +3,7 @@ package app.shopkeep
 import app.shopkeep.auth.SESSION_AUTH
 import app.shopkeep.auth.UserSession
 import app.shopkeep.auth.authRoutes
+import app.shopkeep.auth.userAdminRoutes
 import app.shopkeep.auth.oidcRoutes
 import app.shopkeep.catalog.catalogRoutes
 import app.shopkeep.documents.documentRoutes
@@ -124,6 +125,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
         route("/api/v1") {
             systemRoutes(VERSION)
             authRoutes(graph.userRepository)
+            userAdminRoutes(graph.userRepository)
             oidcRoutes(graph.oidcService, graph.userRepository)
             inventoryRoutes(graph.materialRepository)
             vendorPrefillRoutes(graph.vendorPrefillService)

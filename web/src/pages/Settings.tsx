@@ -170,6 +170,8 @@ export function SettingsPage() {
 
       {isAdmin && (
         <>
+          <h2 className="mt-8 mb-3 text-[13px] font-bold tracking-widest text-ink2 uppercase">Users</h2>
+          <UsersSection selfId={me.data.id} />
           <h2 className="mt-8 mb-3 text-[13px] font-bold tracking-widest text-ink2 uppercase">Fulfillment</h2>
           <SlipSettings />
           <h2 className="mt-8 mb-3 text-[13px] font-bold tracking-widest text-ink2 uppercase">Costs</h2>
@@ -205,6 +207,151 @@ export function SettingsPage() {
       )}
       </div>
     </AppShell>
+  );
+}
+
+type ManagedUser = { id: number; email: string; displayName: string; role: "ADMIN" | "MANAGER"; disabled: boolean; authVia: "local" | "oidc" | "both" };
+
+const genPassword = () => {
+  const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  return Array.from(crypto.getRandomValues(new Uint32Array(14)), (n) => chars[n % chars.length]).join("");
+};
+
+/** Admin user management (Users & Auth): create locals, promote/demote,
+ *  set a new password by hand (self-hosted — no SMTP assumed), soft-disable. */
+function UsersSection({ selfId }: { selfId: number }) {
+  const qc = useQueryClient();
+  const users = useQuery({
+    queryKey: ["users"],
+    queryFn: () => fetch("/api/v1/users").then((r) => r.json() as Promise<ManagedUser[]>),
+  });
+  const [err, setErr] = useState<string | null>(null);
+  const [pwFor, setPwFor] = useState<ManagedUser | null>(null);
+  const [newPw, setNewPw] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [nu, setNu] = useState({ email: "", displayName: "", password: genPassword(), role: "MANAGER" as "ADMIN" | "MANAGER" });
+
+  const act = async (path: string, body: unknown) => {
+    setErr(null);
+    const r = await fetch(`/api/v1${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) setErr(((await r.json().catch(() => null)) as { message?: string } | null)?.message ?? r.statusText);
+    qc.invalidateQueries({ queryKey: ["users"] });
+    return r.ok;
+  };
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">People with access</h2>
+        <button type="button" onClick={() => { setCreating(true); setNu({ email: "", displayName: "", password: genPassword(), role: "MANAGER" }); }}
+          className="rounded-md border border-accent/40 px-3 py-1 text-xs font-semibold text-accent hover:bg-accent/5">
+          + Add user
+        </button>
+      </div>
+      <ErrorText>{err}</ErrorText>
+      <div className="mt-2 divide-y divide-line/60">
+        {(users.data ?? []).map((u) => (
+          <div key={u.id} className={`flex flex-wrap items-center gap-3 py-2.5 ${u.disabled ? "opacity-60" : ""}`}>
+            <span className="min-w-0">
+              <b className="text-sm">{u.displayName}</b>
+              {u.id === selfId && <span className="ml-1.5 text-[10px] text-mut">(you)</span>}
+              <span className="block text-xs text-ink2">{u.email}</span>
+            </span>
+            <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider uppercase ${u.authVia === "local" ? "bg-panel2 text-mut" : "bg-accent/10 text-accent"}`}>
+              {u.authVia === "both" ? "PASSWORD + SSO" : u.authVia === "oidc" ? "SSO" : "PASSWORD"}
+            </span>
+            {u.disabled && <span className="rounded-full bg-crit/10 px-2 py-0.5 text-[9px] font-extrabold tracking-wider text-crit">DISABLED</span>}
+            <span className="ml-auto flex items-center gap-2">
+              <select
+                value={u.role}
+                disabled={u.id === selfId}
+                onChange={(e) => act(`/users/${u.id}/role`, { role: e.target.value })}
+                title={u.id === selfId ? "another admin changes your role" : "role"}
+                className="rounded-md border border-line bg-panel2 px-2 py-1 text-xs disabled:opacity-50"
+              >
+                <option value="ADMIN">admin</option>
+                <option value="MANAGER">manager</option>
+              </select>
+              <button type="button" onClick={() => { setPwFor(u); setNewPw(genPassword()); }}
+                className="rounded-md border border-line px-2 py-1 text-xs font-semibold text-ink2 hover:border-accent hover:text-accent">
+                reset password
+              </button>
+              {u.id !== selfId && (
+                <button type="button" onClick={() => act(`/users/${u.id}/disabled`, { disabled: !u.disabled })}
+                  className={`rounded-md border px-2 py-1 text-xs font-semibold ${u.disabled ? "border-line text-ink2 hover:border-accent hover:text-accent" : "border-crit/40 text-crit hover:border-crit"}`}>
+                  {u.disabled ? "enable" : "disable"}
+                </button>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] text-mut">
+        SSO users appear here after their first sign-in (provisioned as managers). Disabling ends their sessions immediately; users are never deleted — notes and activity keep their author.
+      </p>
+
+      {pwFor && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/35" onClick={() => setPwFor(null)} />
+          <div className="fixed inset-x-0 top-24 z-50 mx-auto w-[min(440px,94vw)] rounded-2xl border border-line bg-bg p-5 shadow-2xl">
+            <b className="text-[15px]">Reset password — {pwFor.displayName}</b>
+            <p className="mt-1 text-xs text-mut">Set a temporary password and hand it over — there's no email server to send links (self-hosted).</p>
+            <div className="mt-3 flex items-center gap-2">
+              <input value={newPw} onChange={(e) => setNewPw(e.target.value)}
+                className="min-w-0 flex-1 rounded-md border border-line bg-panel2 px-3 py-1.5 font-mono text-sm outline-none focus:border-accent" />
+              <button type="button" onClick={() => setNewPw(genPassword())} className="rounded-md border border-line px-2 py-1.5 text-xs text-ink2 hover:border-accent">↻</button>
+              <button type="button" onClick={() => navigator.clipboard?.writeText(newPw)} className="rounded-md border border-line px-2 py-1.5 text-xs text-ink2 hover:border-accent">copy</button>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button type="button" disabled={newPw.length < 8}
+                onClick={async () => { if (await act(`/users/${pwFor.id}/password`, { password: newPw })) setPwFor(null); }}
+                className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                Set password
+              </button>
+              <button type="button" onClick={() => setPwFor(null)} className="rounded-md border border-line px-3 py-1.5 text-xs text-ink2">cancel</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {creating && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/35" onClick={() => setCreating(false)} />
+          <div className="fixed inset-x-0 top-16 z-50 mx-auto w-[min(480px,94vw)] rounded-2xl border border-line bg-bg p-5 shadow-2xl">
+            <b className="text-[15px]">Add a user</b>
+            <div className="mt-3 grid gap-3">
+              <Field label="Name" value={nu.displayName} onChange={(v) => setNu({ ...nu, displayName: v })} autoFocus />
+              <Field label="Email" value={nu.email} onChange={(v) => setNu({ ...nu, email: v })} />
+              <label className="block text-xs">
+                <span className="mb-1 block font-semibold tracking-widest uppercase text-mut">Role</span>
+                <select value={nu.role} onChange={(e) => setNu({ ...nu, role: e.target.value as "ADMIN" | "MANAGER" })}
+                  className="rounded-md border border-line bg-panel2 px-2 py-2 text-sm">
+                  <option value="MANAGER">manager</option>
+                  <option value="ADMIN">admin</option>
+                </select>
+              </label>
+              <label className="block text-xs">
+                <span className="mb-1 block font-semibold tracking-widest uppercase text-mut">Temporary password</span>
+                <span className="flex items-center gap-2">
+                  <input value={nu.password} onChange={(e) => setNu({ ...nu, password: e.target.value })}
+                    className="min-w-0 flex-1 rounded-md border border-line bg-panel2 px-3 py-1.5 font-mono text-sm outline-none focus:border-accent" />
+                  <button type="button" onClick={() => setNu({ ...nu, password: genPassword() })} className="rounded-md border border-line px-2 py-1.5 text-xs text-ink2 hover:border-accent">↻</button>
+                  <button type="button" onClick={() => navigator.clipboard?.writeText(nu.password)} className="rounded-md border border-line px-2 py-1.5 text-xs text-ink2 hover:border-accent">copy</button>
+                </span>
+              </label>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button type="button" disabled={!nu.email.trim() || !nu.displayName.trim() || nu.password.length < 8}
+                onClick={async () => { if (await act("/users", nu)) setCreating(false); }}
+                className="rounded-md bg-accent px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
+                Create user
+              </button>
+              <button type="button" onClick={() => setCreating(false)} className="rounded-md border border-line px-3 py-1.5 text-xs text-ink2">cancel</button>
+            </div>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

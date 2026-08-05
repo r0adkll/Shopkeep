@@ -20,6 +20,9 @@ data class User(
     val email: String,
     val displayName: String,
     val role: Role,
+    val disabled: Boolean = false,
+    /** local (password), oidc, or both — admins see how someone signs in. */
+    val authVia: String = "local",
 )
 
 object UsersTable : Table("users") {
@@ -29,6 +32,7 @@ object UsersTable : Table("users") {
     val passwordHash = text("password_hash").nullable()
     val oidcSubject = text("oidc_subject").nullable().uniqueIndex()
     val role = text("role")
+    val disabled = bool("disabled").default(false)
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -61,8 +65,31 @@ class UserRepository(private val hasher: PasswordHasher) {
         val row = UsersTable.selectAll()
             .where { UsersTable.email eq email.trim().lowercase() }
             .singleOrNull() ?: return@dbQuery null
+        if (row[UsersTable.disabled]) return@dbQuery null
         val hash = row[UsersTable.passwordHash] ?: return@dbQuery null
         if (hasher.verify(password, hash)) row.toUser() else null
+    }
+
+    suspend fun list(): List<User> = dbQuery {
+        UsersTable.selectAll().orderBy(UsersTable.id).map { it.toUser() }
+    }
+
+    suspend fun adminCount(): Long = dbQuery {
+        UsersTable.selectAll().count { it[UsersTable.role] == "admin" && !it[UsersTable.disabled] }.toLong()
+    }
+
+    suspend fun setRole(id: Long, role: Role): Boolean = dbQuery {
+        UsersTable.update({ UsersTable.id eq id }) { it[UsersTable.role] = role.name.lowercase() } > 0
+    }
+
+    suspend fun setPassword(id: Long, plain: String): Boolean = dbQuery {
+        UsersTable.update({ UsersTable.id eq id }) { it[passwordHash] = hasher.hash(plain) } > 0
+    }
+
+    /** Soft-disable; sessions are revoked by the caller. Never delete —
+     *  notes/events keep their author provenance. */
+    suspend fun setDisabled(id: Long, disabled: Boolean): Boolean = dbQuery {
+        UsersTable.update({ UsersTable.id eq id }) { it[UsersTable.disabled] = disabled } > 0
     }
 
     suspend fun findById(id: Long): User? = dbQuery {
@@ -104,5 +131,11 @@ class UserRepository(private val hasher: PasswordHasher) {
         email = this[UsersTable.email],
         displayName = this[UsersTable.displayName],
         role = Role.valueOf(this[UsersTable.role].uppercase()),
+        disabled = this[UsersTable.disabled],
+        authVia = when {
+            this[UsersTable.passwordHash] != null && this[UsersTable.oidcSubject] != null -> "both"
+            this[UsersTable.oidcSubject] != null -> "oidc"
+            else -> "local"
+        },
     )
 }

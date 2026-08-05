@@ -11,9 +11,12 @@ import io.ktor.server.routing.application
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.sessions.clear
+import io.ktor.server.sessions.get
 import io.ktor.server.sessions.sessions
 import io.ktor.server.sessions.set
 import kotlinx.serialization.Serializable
+import org.jetbrains.exposed.sql.deleteWhere
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 
 @Serializable
 data class SetupStatus(val needsSetup: Boolean)
@@ -97,4 +100,83 @@ fun Route.requireAdmin(build: Route.() -> Unit) {
         install(adminOnly)
         build()
     }
+}
+
+/* ---------- user management (Users & Auth: admin-only) ---------- */
+
+@Serializable
+data class CreateUserRequest(val email: String, val displayName: String, val password: String, val role: Role)
+
+@Serializable
+data class SetRoleRequest(val role: Role)
+
+@Serializable
+data class SetPasswordRequest(val password: String)
+
+@Serializable
+data class SetDisabledRequest(val disabled: Boolean)
+
+fun Route.userAdminRoutes(users: UserRepository) {
+    requireAdmin {
+        get("/users") { call.respond(users.list()) }
+
+        post("/users") {
+            val req = call.receive<CreateUserRequest>()
+            if (req.email.isBlank() || req.displayName.isBlank() || req.password.length < 8) {
+                call.respond(HttpStatusCode.UnprocessableEntity, ApiError("Email, name, and a password of 8+ characters are required."))
+                return@post
+            }
+            if (users.list().any { it.email == req.email.trim().lowercase() }) {
+                call.respond(HttpStatusCode.Conflict, ApiError("A user with that email already exists."))
+                return@post
+            }
+            call.respond(HttpStatusCode.Created, users.createLocalUser(req.email, req.displayName, req.password, req.role))
+        }
+
+        post("/users/{id}/role") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            val req = call.receive<SetRoleRequest>()
+            val self = call.sessions.get<UserSession>()
+            when {
+                id == null -> call.respond(HttpStatusCode.NotFound, ApiError("User not found."))
+                id == self?.userId -> call.respond(HttpStatusCode.UnprocessableEntity, ApiError("You can't change your own role — ask another admin."))
+                req.role == Role.MANAGER && users.findById(id)?.role == Role.ADMIN && users.adminCount() <= 1 ->
+                    call.respond(HttpStatusCode.UnprocessableEntity, ApiError("That's the last active admin."))
+                else -> { users.setRole(id, req.role); call.respond(users.findById(id)!!) }
+            }
+        }
+
+        post("/users/{id}/password") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            val req = call.receive<SetPasswordRequest>()
+            when {
+                id == null || users.findById(id) == null -> call.respond(HttpStatusCode.NotFound, ApiError("User not found."))
+                req.password.length < 8 -> call.respond(HttpStatusCode.UnprocessableEntity, ApiError("Password needs 8+ characters."))
+                else -> { users.setPassword(id, req.password); call.respond(mapOf("ok" to true)) }
+            }
+        }
+
+        post("/users/{id}/disabled") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            val req = call.receive<SetDisabledRequest>()
+            val self = call.sessions.get<UserSession>()
+            val target = id?.let { users.findById(it) }
+            when {
+                id == null || target == null -> call.respond(HttpStatusCode.NotFound, ApiError("User not found."))
+                id == self?.userId -> call.respond(HttpStatusCode.UnprocessableEntity, ApiError("You can't disable yourself."))
+                req.disabled && target.role == Role.ADMIN && users.adminCount() <= 1 ->
+                    call.respond(HttpStatusCode.UnprocessableEntity, ApiError("That's the last active admin."))
+                else -> {
+                    users.setDisabled(id, req.disabled)
+                    if (req.disabled) revokeSessionsFor(id)
+                    call.respond(users.findById(id)!!)
+                }
+            }
+        }
+    }
+}
+
+/** Disabling someone must end their live sessions immediately. */
+private suspend fun revokeSessionsFor(userId: Long) = app.shopkeep.db.dbQuery {
+    SessionsTable.deleteWhere { SessionsTable.userId eq userId }
 }
