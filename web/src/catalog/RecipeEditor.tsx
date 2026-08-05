@@ -502,7 +502,10 @@ function FixedMaterialRow({ all, material, onChange }: {
     <div className="mt-2">
       {material ? (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel2/60 px-3 py-2">
-          <span className="h-8 w-8 flex-none rounded-lg border border-line" style={{ background: materialColor(material) ?? "var(--color-panel2)" }} />
+          <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-line bg-panel">
+            <MaterialIcon category={material.category} type={material.type} size={20}
+              style={{ color: materialColor(material) ?? "var(--color-ink2)" }} />
+          </span>
           <span className="min-w-0">
             <span className="flex items-baseline gap-1.5">
               <b className="truncate text-sm">{material.name}</b>
