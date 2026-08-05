@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ClipboardList, Hammer, Menu, Plug, Tags, X } from "lucide-react";
+import { Boxes, ClipboardList, Hammer, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plug, Tags, X } from "lucide-react";
 import { api } from "./api";
 
 /** Minimal primitives in the concept's visual language; the full shadcn/ui
@@ -129,6 +129,12 @@ export function AppShell({ active, title, actions, children }: {
   children: ReactNode;
 }) {
   const [drawer, setDrawer] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("shell.sidebar") === "collapsed");
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem("shell.sidebar", next ? "collapsed" : "open");
+  };
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
@@ -140,40 +146,50 @@ export function AppShell({ active, title, actions, children }: {
     },
   });
 
-  const sidebarInner = (
+  const sidebarInner = (mini: boolean) => (
     <>
-      <div className="flex items-center gap-2.5 px-5 py-5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent font-display text-[15px] font-bold text-white">S</span>
-        <span className="font-display text-[15px] font-bold tracking-widest uppercase">Shopkeep</span>
+      <div className={`flex items-center gap-2.5 py-5 ${mini ? "justify-center px-0" : "px-5"}`}>
+        <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-accent font-display text-[15px] font-bold text-white">S</span>
+        {!mini && <span className="font-display text-[15px] font-bold tracking-widest uppercase">Shopkeep</span>}
       </div>
-      <nav className="flex-1 space-y-0.5 px-3">
+      <nav className={`flex-1 space-y-0.5 ${mini ? "px-2" : "px-3"}`}>
         {NAV.map(({ label, to, Icon }) => (
           <Link
             key={to}
             to={to}
             onClick={() => setDrawer(false)}
+            title={mini ? label : undefined}
             aria-current={active === label ? "page" : undefined}
-            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
+            className={`flex items-center gap-2.5 rounded-lg py-2 text-sm transition-colors ${mini ? "justify-center px-0" : "px-3"} ${
               active === label ? "bg-panel2 font-semibold text-ink" : "text-ink2 hover:bg-panel2/60 hover:text-ink"
             }`}
           >
-            <Icon size={17} className={active === label ? "text-accent" : "text-mut"} />
-            {label}
+            <Icon size={17} className={`flex-none ${active === label ? "text-accent" : "text-mut"}`} />
+            {!mini && label}
           </Link>
         ))}
       </nav>
-      <div className="border-t border-line px-5 py-4 text-sm">
-        <div className="flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate text-ink2">{me.data?.displayName ?? ""}</span>
-          {me.data && (
-            <span className="rounded-full border border-line px-2 py-0.5 text-[10px] tracking-wider text-mut uppercase">
-              {me.data.role.toLowerCase()}
-            </span>
-          )}
-        </div>
-        <button type="button" onClick={() => logout.mutate()} className="mt-1.5 text-xs text-accent hover:underline">
-          Sign out
-        </button>
+      <div className={`border-t border-line py-4 text-sm ${mini ? "px-2" : "px-5"}`}>
+        {mini ? (
+          <button type="button" onClick={() => logout.mutate()} title="Sign out"
+            className="flex w-full justify-center rounded-lg py-2 text-ink2 hover:bg-panel2/60 hover:text-ink">
+            <LogOut size={16} />
+          </button>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-ink2">{me.data?.displayName ?? ""}</span>
+              {me.data && (
+                <span className="rounded-full border border-line px-2 py-0.5 text-[10px] tracking-wider text-mut uppercase">
+                  {me.data.role.toLowerCase()}
+                </span>
+              )}
+            </div>
+            <button type="button" onClick={() => logout.mutate()} className="mt-1.5 text-xs text-accent hover:underline">
+              Sign out
+            </button>
+          </>
+        )}
       </div>
     </>
   );
@@ -181,8 +197,8 @@ export function AppShell({ active, title, actions, children }: {
   return (
     <div className="flex min-h-screen">
       {/* desktop sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-60 flex-none flex-col border-r border-line bg-panel lg:flex">
-        {sidebarInner}
+      <aside className={`sticky top-0 hidden h-screen flex-none flex-col border-r border-line bg-panel transition-[width] duration-150 lg:flex ${collapsed ? "w-[60px]" : "w-60"}`}>
+        {sidebarInner(collapsed)}
       </aside>
 
       {/* mobile drawer */}
@@ -192,7 +208,7 @@ export function AppShell({ active, title, actions, children }: {
           <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-line bg-panel shadow-2xl lg:hidden">
             <button type="button" onClick={() => setDrawer(false)}
               className="absolute top-4 right-3 rounded-md border border-line p-1 text-ink2"><X size={15} /></button>
-            {sidebarInner}
+            {sidebarInner(false)}
           </aside>
         </>
       )}
@@ -201,6 +217,10 @@ export function AppShell({ active, title, actions, children }: {
         <header className="sticky top-0 z-30 flex flex-wrap items-center gap-3 border-b border-line bg-bg/90 px-4 py-3 backdrop-blur lg:px-8">
           <button type="button" onClick={() => setDrawer(true)}
             className="rounded-md border border-line p-1.5 text-ink2 lg:hidden"><Menu size={17} /></button>
+          <button type="button" onClick={toggleCollapsed} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="hidden rounded-md border border-line p-1.5 text-ink2 hover:border-accent hover:text-accent lg:block">
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
           <h1 className="text-[15px] font-bold">{title ?? active}</h1>
           <div className="ml-auto flex flex-wrap items-center gap-3">{actions}</div>
         </header>
