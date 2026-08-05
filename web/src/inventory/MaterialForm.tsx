@@ -92,7 +92,7 @@ function ColorField({ value, onChange, presets }: { value: string; onChange: (v:
 type CategoryProfile = {
   types: string[];
   /** Applied on category selection during creation (never on edit). */
-  defaults?: Partial<Pick<MaterialInput, "unit" | "costQuantity" | "fullQuantity">>;
+  defaults?: Partial<Pick<MaterialInput, "unit" | "costQuantity" | "fullQuantity" | "lowStockThreshold">>;
   colorPrimary?: boolean;
   typeStrict?: boolean;
 };
@@ -113,7 +113,8 @@ const PROFILES: Record<string, CategoryProfile> = {
       "PA (Nylon)",
       "PVA (Support)",
     ],
-    defaults: { unit: "g", costQuantity: 1000, fullQuantity: 1000 },
+    // Threshold convention: a spool reads "low" at 25% remaining.
+    defaults: { unit: "g", costQuantity: 1000, fullQuantity: 1000, lowStockThreshold: 250 },
     colorPrimary: true,
     typeStrict: true,
   },
@@ -190,6 +191,7 @@ export function MaterialForm({
       unit: m.unit || p?.defaults?.unit || "",
       costQuantity: m.costQuantity !== 1 ? m.costQuantity : (p?.defaults?.costQuantity ?? 1),
       fullQuantity: m.fullQuantity ?? p?.defaults?.fullQuantity ?? null,
+      lowStockThreshold: m.lowStockThreshold ?? p?.defaults?.lowStockThreshold ?? null,
     });
   };
 
@@ -220,7 +222,7 @@ export function MaterialForm({
   const [prefillUrl, setPrefillUrl] = useState("");
   const [prefillNote, setPrefillNote] = useState<string | null>(null);
   const prefill = useMutation({
-    mutationFn: () => inventoryApi.prefill(prefillUrl.trim()),
+    mutationFn: (url: string) => inventoryApi.prefill(url),
     onSuccess: (r) => {
       setM((prev) => ({
         ...prev,
@@ -232,7 +234,12 @@ export function MaterialForm({
         currency: r.currency || prev.currency,
         costQuantity: prev.costQuantity !== 1 ? prev.costQuantity : (r.costQuantity ?? prev.costQuantity),
         fullQuantity: prev.fullQuantity ?? r.fullQuantity ?? null,
-        vendorUrl: r.vendorUrl,
+        lowStockThreshold:
+          prev.lowStockThreshold ??
+          ((r.category === "filament" || prev.category === "filament") && (r.fullQuantity ?? prev.fullQuantity)
+            ? Math.round((r.fullQuantity ?? prev.fullQuantity ?? 0) * 0.25)
+            : null),
+        vendorUrl: prev.vendorUrl || r.vendorUrl,
       }));
       if (r.costMinor != null && !costDollars) setCostDollars((r.costMinor / 100).toFixed(2));
       if (r.colorHex && !color) setColor(r.colorHex);
@@ -273,6 +280,8 @@ export function MaterialForm({
       unit: prev.unit || "g",
       costQuantity: prev.costQuantity !== 1 ? prev.costQuantity : grams,
       fullQuantity: prev.fullQuantity ?? grams,
+      lowStockThreshold: prev.lowStockThreshold ?? Math.round(grams * 0.25),
+      reorderQuantity: prev.reorderQuantity ?? grams,
       attributes: {
         ...prev.attributes,
         ofdVariantId: f.variantId,
@@ -282,8 +291,11 @@ export function MaterialForm({
     }));
     if (f.colorHex && !color) setColor(f.colorHex);
     setPrefillNote(
-      `From catalog: ${f.brand} ${f.line} — ${f.colorName}${f.discontinued ? " (discontinued)" : ""}${link ? ` · vendor link: ${link.store}` : ""}`,
+      `From catalog: ${f.brand} ${f.line} — ${f.colorName}${f.discontinued ? " (discontinued)" : ""}${link ? ` · vendor link: ${link.store}${!costDollars ? ", fetching price…" : ""}` : ""}`,
     );
+    // OFD carries no prices — chain the vendor-page fetch to pull one off
+    // the store we just linked (fills cost only if still untouched).
+    if (link && !costDollars) prefill.mutate(link.url);
     setBrowsing(false);
   };
 
@@ -297,13 +309,13 @@ export function MaterialForm({
               <input
                 value={prefillUrl}
                 onChange={(e) => setPrefillUrl(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (prefillUrl.trim()) prefill.mutate(); } }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (prefillUrl.trim()) prefill.mutate(prefillUrl.trim()); } }}
                 placeholder="Paste a product link (Overture, Polymaker, Bambu Lab, …) to prefill"
                 className="min-w-0 flex-1 rounded-md border border-line bg-panel px-3 py-1.5 text-sm outline-none placeholder:text-mut focus:border-accent"
               />
               <button
                 type="button"
-                onClick={() => prefill.mutate()}
+                onClick={() => prefill.mutate(prefillUrl.trim())}
                 disabled={prefill.isPending || !prefillUrl.trim()}
                 className="rounded-md border border-accent/40 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/5 disabled:opacity-50"
               >
