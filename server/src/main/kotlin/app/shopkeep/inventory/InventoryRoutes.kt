@@ -35,6 +35,10 @@ data class ArchiveRequest(val archived: Boolean)
 data class WeighInRequest(
     val grossGrams: Double,
     val tareGrams: Double,
+    /** Grams sitting in sealed, unweighed spools of the same material — the
+     *  scale only sees the open spool; these are assumed untouched. Omitted =
+     *  server derives it from on-hand vs. spool size. */
+    val sealedGrams: Double? = null,
     /** True when the tare was set or corrected this weigh-in — persists it. */
     val saveTare: Boolean = false,
     /** Optional near-empty shortcut: archive the spool in the same breath. */
@@ -140,17 +144,28 @@ fun Route.inventoryRoutes(materials: MaterialRepository) {
             }
             fun g(v: Double) = if (v % 1.0 == 0.0) v.toLong().toString() else "%.1f".format(v)
             val net = (req.grossGrams - req.tareGrams).coerceAtLeast(0.0)
-            val delta = net - m.stock.onHand
+            // Multi-spool holdings: on-hand may span several spools but the
+            // scale only sees the open one. Sealed spools are assumed
+            // untouched — default = every whole spool-size below on-hand
+            // (4,560 g at 1 kg spools → 4 sealed + the 560 g being weighed).
+            val full = m.fullQuantity
+            val sealed = (req.sealedGrams
+                ?: if (full != null && full > 0 && m.stock.onHand > full) (kotlin.math.ceil(m.stock.onHand / full) - 1) * full
+                else 0.0)
+                .coerceAtLeast(0.0)
+            val delta = (sealed + net) - m.stock.onHand
             val userId = call.principal<UserSession>()!!.userId
             if (kotlin.math.abs(delta) >= 0.05) {
+                val sealedNote = if (sealed > 0) " + ${g(sealed)} g sealed spools" else ""
                 materials.recordTransaction(
                     id, delta, TxnKind.ADJUSTMENT,
-                    "weigh-in: ${g(req.grossGrams)} g gross − ${g(req.tareGrams)} g tare = ${g(net)} g (was ${g(m.stock.onHand)} g)",
+                    "weigh-in: ${g(req.grossGrams)} g gross − ${g(req.tareGrams)} g tare = ${g(net)} g open spool$sealedNote (was ${g(m.stock.onHand)} g)",
                     userId,
                 )
             }
             if (req.saveTare) materials.setAttribute(id, "spoolWeightGrams", g(req.tareGrams))
-            if (req.markEmpty) materials.setArchived(id, true)
+            // archiving only makes sense when this was the LAST spool
+            if (req.markEmpty && sealed <= 0) materials.setArchived(id, true)
             call.respond(MaterialDetail(materials.get(id)!!, materials.ledger(id)))
         }
 

@@ -38,6 +38,15 @@ export function WeighInSheet({
   const [gross, setGross] = useState("");
   const [markEmpty, setMarkEmpty] = useState(false);
 
+  // Multi-spool holdings: the scale only sees the open spool — whole
+  // spool-sizes below on-hand are assumed sealed and untouched. The count is
+  // editable in case reality differs (two spools open, one gifted away…).
+  const fullSize = m.fullQuantity && m.fullQuantity > 0 ? m.fullQuantity : 1000;
+  const defaultSealed = m.stock.onHand > fullSize ? Math.ceil(m.stock.onHand / fullSize) - 1 : 0;
+  const [sealedCount, setSealedCount] = useState(defaultSealed);
+  const sealedGrams = sealedCount * fullSize;
+  const openExpected = Math.max(0, m.stock.onHand - sealedGrams);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -45,11 +54,11 @@ export function WeighInSheet({
   }, [onClose]);
 
   const g = parseFloat(gross);
-  const full = m.fullQuantity ?? 1000;
   const measured = tare != null && Number.isFinite(g) ? Math.max(0, g - tare) : null;
-  const delta = measured != null ? measured - m.stock.onHand : null;
-  const [tone, label] = delta != null ? driftBand(Math.abs(delta), full) : ["good", ""];
-  const nearEmpty = measured != null && measured <= NEAR_EMPTY_G;
+  // Drift is judged against the OPEN spool only — sealed spools ride along.
+  const delta = measured != null ? measured - openExpected : null;
+  const [tone, label] = delta != null ? driftBand(Math.abs(delta), fullSize) : ["good", ""];
+  const nearEmpty = measured != null && measured <= NEAR_EMPTY_G && sealedCount === 0;
   const isBambu = (m.brand ?? "").toLowerCase().includes("bambu");
 
   const record = useMutation({
@@ -57,6 +66,7 @@ export function WeighInSheet({
       inventoryApi.weighIn(m.id, {
         grossGrams: g,
         tareGrams: tare!,
+        sealedGrams,
         saveTare: tareEdited,
         markEmpty: nearEmpty && markEmpty,
       }),
@@ -87,7 +97,7 @@ export function WeighInSheet({
             <span className="h-5 w-5 flex-none self-center rounded-md border border-line" style={{ background: color ?? "var(--color-panel2)" }} />
             <b className="min-w-0 flex-1 truncate text-[15px]">{m.name}</b>
             <span className="flex-none text-[11px] text-mut">
-              on the spool: <b className="font-mono text-ink">{formatQty(m.stock.onHand)} g</b>
+              on the open spool: <b className="font-mono text-ink">{formatQty(openExpected)} g</b>
               {m.stock.reserved > 0 && <> · {formatQty(m.stock.reserved)} g reserved (unaffected)</>}
             </span>
           </div>
@@ -132,6 +142,18 @@ export function WeighInSheet({
             </div>
           ) : (
             <div className="mt-3 grid gap-1 border-t border-dotted border-line pt-2.5 text-[13px]">
+              {(defaultSealed > 0 || sealedCount > 0) && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink2">sealed spools — assumed untouched</span>
+                  <span className="flex items-center gap-1.5 font-mono">
+                    <button type="button" onClick={() => setSealedCount(Math.max(0, sealedCount - 1))}
+                      className="rounded border border-line px-1.5 text-xs text-ink2 hover:border-accent hover:text-accent">−</button>
+                    {sealedCount} × {formatQty(fullSize)} g
+                    <button type="button" onClick={() => setSealedCount(sealedCount + 1)}
+                      className="rounded border border-line px-1.5 text-xs text-ink2 hover:border-accent hover:text-accent">+</button>
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between gap-3">
                 <span className="text-ink2">tare — {tareEdited ? "set this session" : "on file"}</span>
                 <span className="font-mono">
@@ -143,9 +165,15 @@ export function WeighInSheet({
                 </span>
               </div>
               <div className="flex justify-between gap-3">
-                <span className="text-ink2">filament remaining</span>
+                <span className="text-ink2">on the open spool</span>
                 <span className="font-mono">{measured != null ? `= ${formatQty(measured)} g` : "—"}</span>
               </div>
+              {sealedGrams > 0 && measured != null && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink2">new total (open + sealed)</span>
+                  <span className="font-mono">{formatQty(measured + sealedGrams)} g</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -153,9 +181,9 @@ export function WeighInSheet({
             <div className={`mt-3 flex flex-wrap items-baseline gap-2 rounded-xl px-3.5 py-2.5 text-[13px] ${toneBg} ${toneText}`}>
               <b className="text-[15px]">{delta === 0 ? "±0 g" : `${delta > 0 ? "+" : "−"}${formatQty(Math.abs(delta))} g`}</b>
               <span>
-                {label === "MATCHES" ? "matches the ledger" :
-                  label === "DRIFT" ? "vs. ledger — the adjustment will correct it" :
-                    "big gap vs. ledger — wrong spool, or usage never logged?"}
+                {label === "MATCHES" ? `matches the ledger${sealedGrams > 0 ? "'s open spool" : ""}` :
+                  label === "DRIFT" ? `vs. the ${sealedGrams > 0 ? "open spool — " : "ledger — "}the adjustment will correct it` :
+                    "big gap vs. the open spool — wrong spool, wrong sealed count, or usage never logged?"}
               </span>
               {nearEmpty && (
                 <label className="flex w-full items-center gap-1.5 text-[12px] font-medium">
