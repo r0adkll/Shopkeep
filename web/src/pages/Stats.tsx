@@ -228,10 +228,33 @@ export function StatsPage() {
 
 /* ---------- charts (SVG, design-system tokens, one $ scale) ---------- */
 
+/** Instant hover tooltip — native SVG <title> is too slow/subtle to read values. */
+function useTip() {
+  const [tip, setTip] = useState<{ x: number; y: number; lines: string[] } | null>(null);
+  const show = (e: React.MouseEvent, lines: string[]) =>
+    setTip({ x: Math.min(e.clientX + 14, window.innerWidth - 190), y: e.clientY - 14 - lines.length * 18, lines });
+  const hide = () => setTip(null);
+  const node = tip ? (
+    <div className="pointer-events-none fixed z-50 rounded-lg bg-ink px-2.5 py-1.5 font-mono text-[11.5px] leading-[18px] whitespace-nowrap text-bg shadow-lg" style={{ left: tip.x, top: tip.y }}>
+      {tip.lines.map((l) => <div key={l}>{l}</div>)}
+    </div>
+  ) : null;
+  return { show, hide, node };
+}
+
+/** Mouse x → nearest series index, accounting for the responsive viewBox scale. */
+function nearestIndex(e: React.MouseEvent<SVGSVGElement>, n: number, padL: number, iw: number, W: number) {
+  const r = e.currentTarget.getBoundingClientRect();
+  const mx = ((e.clientX - r.left) / r.width) * W;
+  return Math.max(0, Math.min(n - 1, Math.round(((mx - padL) / iw) * (n - 1))));
+}
+
 function CashflowChart({ data, mode, style }: { data: StatsResponse; mode: "cum" | "period"; style: "bar" | "line" }) {
-  const W = 640, H = 200, padL = 44, padB = 30, padT = 16, padR = 56;
+  const W = 640, H = 210, padL = 48, padB = 34, padT = 16, padR = 60;
   const iw = W - padL - padR, ih = H - padT - padB;
   const daily = data.daily;
+  const { show, hide, node } = useTip();
+  const [hi, setHi] = useState<number | null>(null);
 
   const months = useMemo(() => {
     const m = new Map<string, { label: string; rev: number; profit: number; orders: number; partial: boolean }>();
@@ -256,98 +279,116 @@ function CashflowChart({ data, mode, style }: { data: StatsResponse; mode: "cum"
     const y = (v: number) => padT + ih - (v / max) * ih;
     const path = (arr: number[]) => arr.map((v, i) => `${i ? "L" : "M"} ${x(i)} ${y(v)}`).join(" ");
     return (
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Cumulative revenue and profit">
-        {[0.5, 1].map((f) => (
-          <g key={f}>
-            <line x1={padL} x2={W - padR} y1={y(max * f * 0.94)} y2={y(max * f * 0.94)} stroke="var(--color-line)" opacity=".55" />
-            <text x={padL - 4} y={y(max * f * 0.94) + 3} textAnchor="end" fontSize="9" fill="var(--color-mut)" fontFamily="var(--font-mono)">{$(max * f * 0.94)}</text>
-          </g>
-        ))}
-        <path d={`${path(cRev)} L ${x(daily.length - 1)} ${y(0)} L ${x(0)} ${y(0)} Z`} fill="var(--color-accent)" opacity=".08" />
-        <path d={path(cRev)} fill="none" stroke="var(--color-accent)" strokeWidth="2.4" strokeLinejoin="round" />
-        <path d={path(cProf)} fill="none" stroke="var(--color-s-profit)" strokeWidth="2.4" strokeLinejoin="round" />
-        {daily.map((dd, i) => dd.orders > 0 && (
-          <line key={dd.date} x1={x(i)} x2={x(i)} y1={padT + ih + 2} y2={padT + ih + 2 + Math.min(dd.orders * 2.2, 9)} stroke="var(--color-mut)" strokeWidth="1.6" opacity=".7">
-            <title>{dd.date}: {dd.orders} order{dd.orders > 1 ? "s" : ""}</title>
-          </line>
-        ))}
-        {daily.map((dd, i) => (
-          <circle key={dd.date} cx={x(i)} cy={y(cRev[i])} r="7" fill="transparent">
-            <title>{dd.date} — {$(cRev[i])} revenue · {$(cProf[i])} profit so far</title>
-          </circle>
-        ))}
-        <text x={W - padR + 4} y={y(cRev[cRev.length - 1]) + 3} fontSize="10" fontWeight="700" fill="var(--color-accent)" fontFamily="var(--font-mono)">{$(cRev[cRev.length - 1])}</text>
-        <text x={W - padR + 4} y={y(cProf[cProf.length - 1]) + 3} fontSize="10" fontWeight="700" fill="var(--color-s-profit)" fontFamily="var(--font-mono)">{$(cProf[cProf.length - 1])}</text>
-        <line x1={padL} x2={W - padR} y1={padT + ih} y2={padT + ih} stroke="var(--color-line)" />
-        <text x={padL} y={H - 4} fontSize="9" fill="var(--color-mut)">{daily[0].date}</text>
-        <text x={W - padR} y={H - 4} textAnchor="end" fontSize="9" fill="var(--color-mut)">today</text>
-      </svg>
+      <>
+        {node}
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Cumulative revenue and profit"
+          onMouseMove={(e) => {
+            const i = nearestIndex(e, daily.length, padL, iw, W);
+            setHi(i);
+            show(e, [daily[i].date, `revenue so far  ${$(cRev[i])}`, `profit so far   ${$(cProf[i])}`, `${daily[i].orders} order${daily[i].orders === 1 ? "" : "s"} that day`]);
+          }}
+          onMouseLeave={() => { setHi(null); hide(); }}>
+          {[0.25, 0.5, 0.75, 1].map((f) => (
+            <g key={f}>
+              <line x1={padL} x2={W - padR} y1={y(max * f)} y2={y(max * f)} stroke="var(--color-line)" opacity=".55" />
+              <text x={padL - 4} y={y(max * f) + 3} textAnchor="end" fontSize="9" fill="var(--color-mut)" fontFamily="var(--font-mono)">{$(max * f)}</text>
+            </g>
+          ))}
+          <path d={`${path(cRev)} L ${x(daily.length - 1)} ${y(0)} L ${x(0)} ${y(0)} Z`} fill="var(--color-accent)" opacity=".08" />
+          <path d={path(cRev)} fill="none" stroke="var(--color-accent)" strokeWidth="2.4" strokeLinejoin="round" />
+          <path d={path(cProf)} fill="none" stroke="var(--color-s-profit)" strokeWidth="2.4" strokeLinejoin="round" />
+          {daily.map((dd, i) => dd.orders > 0 && (
+            <line key={dd.date} x1={x(i)} x2={x(i)} y1={padT + ih + 2} y2={padT + ih + 2 + Math.min(dd.orders * 2.2, 9)} stroke="var(--color-mut)" strokeWidth="1.6" opacity=".7" />
+          ))}
+          {hi != null && (
+            <g pointerEvents="none">
+              <line x1={x(hi)} x2={x(hi)} y1={padT} y2={padT + ih} stroke="var(--color-mut)" strokeDasharray="3 3" />
+              <circle cx={x(hi)} cy={y(cRev[hi])} r="4" fill="var(--color-accent)" stroke="var(--color-panel)" strokeWidth="1.5" />
+              <circle cx={x(hi)} cy={y(cProf[hi])} r="4" fill="var(--color-s-profit)" stroke="var(--color-panel)" strokeWidth="1.5" />
+            </g>
+          )}
+          <text x={W - padR + 4} y={y(cRev[cRev.length - 1]) + 3} fontSize="10" fontWeight="700" fill="var(--color-accent)" fontFamily="var(--font-mono)">{$(cRev[cRev.length - 1])}</text>
+          <text x={W - padR + 4} y={y(cProf[cProf.length - 1]) + 3} fontSize="10" fontWeight="700" fill="var(--color-s-profit)" fontFamily="var(--font-mono)">{$(cProf[cProf.length - 1])}</text>
+          <line x1={padL} x2={W - padR} y1={padT + ih} y2={padT + ih} stroke="var(--color-line)" />
+          <text x={padL} y={H - 4} fontSize="9" fill="var(--color-mut)">{daily[0].date}</text>
+          <text x={W - padR} y={H - 4} textAnchor="end" fontSize="9" fill="var(--color-mut)">today</text>
+        </svg>
+      </>
     );
   }
 
-  // period view: months at 90 d, days at 30 d
+  // period view: months at 90 d, days at 30 d — every mark carries its number
   const buckets = data.days >= 60
     ? months
     : daily.map((dd) => ({ label: dd.date.slice(5), rev: dd.revenueMinor, profit: dd.profitMinor, orders: dd.orders, partial: false }));
   const isMonthly = data.days >= 60;
-  const max = Math.max(...buckets.map((b) => b.rev), 1) * 1.15;
+  const max = Math.max(...buckets.map((b) => b.rev), 1) * (isMonthly ? 1.15 : 1.3);
   const y = (v: number) => padT + ih - (v / max) * ih;
   const gw = iw / buckets.length;
+  const tipFor = (b: (typeof buckets)[number]) => [
+    `${b.label}${b.partial ? " (so far)" : ""}`,
+    `revenue  ${$(b.rev)}`, `profit   ${$(b.profit)}`, `${b.orders} order${b.orders === 1 ? "" : "s"}`,
+  ];
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Revenue and profit by period">
-      <line x1={padL} x2={W - padR} y1={padT + ih} y2={padT + ih} stroke="var(--color-line)" />
-      {style === "line" ? (
-        <>
-          {([["rev", "var(--color-accent)"], ["profit", "var(--color-s-profit)"]] as const).map(([k, color]) => (
+    <>
+      {node}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Revenue and profit by period">
+        <line x1={padL} x2={W - padR} y1={padT + ih} y2={padT + ih} stroke="var(--color-line)" />
+        {style === "line" ? (
+          ([["rev", "var(--color-accent)"], ["profit", "var(--color-s-profit)"]] as const).map(([k, color]) => (
             <g key={k}>
               <polyline points={buckets.map((b, i) => `${padL + i * gw + gw / 2},${y(k === "rev" ? b.rev : b.profit)}`).join(" ")}
                 fill="none" stroke={color} strokeWidth="2.4" strokeLinejoin="round" />
               {buckets.map((b, i) => (
-                <circle key={i} cx={padL + i * gw + gw / 2} cy={y(k === "rev" ? b.rev : b.profit)} r={isMonthly ? 3.2 : 1.8} fill={color}>
-                  <title>{b.label}{b.partial ? " (so far)" : ""} — {k === "rev" ? "revenue" : "profit"} {$(k === "rev" ? b.rev : b.profit)}</title>
-                </circle>
+                <circle key={i} cx={padL + i * gw + gw / 2} cy={y(k === "rev" ? b.rev : b.profit)} r={isMonthly ? 4 : 2.6} fill={color}
+                  onMouseMove={(e) => show(e, tipFor(b))} onMouseLeave={hide} />
+              ))}
+              {isMonthly && buckets.map((b, i) => (
+                <text key={i} x={padL + i * gw + gw / 2} y={y(k === "rev" ? b.rev : b.profit) + (k === "rev" ? -8 : 15)} textAnchor="middle"
+                  fontSize="10" fontWeight="700" fill={color} fontFamily="var(--font-mono)">{$(k === "rev" ? b.rev : b.profit)}</text>
               ))}
             </g>
-          ))}
-        </>
-      ) : (
-        buckets.map((b, i) => {
-          const cx = padL + i * gw + gw / 2;
-          const bw = isMonthly ? Math.min(gw * 0.28, 46) : Math.max(gw - 2, 1.5);
-          return (
-            <g key={i}>
-              {isMonthly ? (
-                <>
-                  <rect x={cx - bw - 2} y={y(b.rev)} width={bw} height={padT + ih - y(b.rev)} rx="3.5" fill="var(--color-accent)" opacity=".82">
-                    <title>{b.label}{b.partial ? " (so far)" : ""} — revenue {$(b.rev)} · {b.orders} orders</title>
-                  </rect>
-                  <rect x={cx + 2} y={y(b.profit)} width={bw} height={padT + ih - y(b.profit)} rx="3.5" fill="var(--color-s-profit)" opacity=".88">
-                    <title>{b.label}{b.partial ? " (so far)" : ""} — net profit {$(b.profit)}</title>
-                  </rect>
-                </>
-              ) : b.rev > 0 && (
-                <rect x={cx - bw / 2} y={y(b.rev)} width={bw} height={padT + ih - y(b.rev)} rx="2" fill="var(--color-accent)" opacity=".82">
-                  <title>{b.label} — {$(b.rev)} revenue</title>
-                </rect>
-              )}
-            </g>
-          );
-        })
-      )}
-      {isMonthly && buckets.map((b, i) => (
-        <g key={b.label}>
-          <text x={padL + i * gw + gw / 2} y={y(b.rev) - 5} textAnchor="middle" fontSize="10" fontWeight="700" fill="var(--color-ink)" fontFamily="var(--font-mono)">{$(b.rev)}</text>
-          <text x={padL + i * gw + gw / 2} y={H - 16} textAnchor="middle" fontSize="10.5" fontWeight="700" fill="var(--color-mut)">{b.label}{b.partial ? "*" : ""}</text>
-          <text x={padL + i * gw + gw / 2} y={H - 4} textAnchor="middle" fontSize="9" fill="var(--color-mut)" fontFamily="var(--font-mono)">{b.orders} orders</text>
-        </g>
-      ))}
-      {isMonthly
-        ? <text x={W - padR} y={padT - 6} textAnchor="end" fontSize="9" fill="var(--color-mut)">* current month, still filling</text>
-        : <>
-            <text x={padL} y={H - 4} fontSize="9" fill="var(--color-mut)">{buckets[0]?.label}</text>
-            <text x={W - padR} y={H - 4} textAnchor="end" fontSize="9" fill="var(--color-mut)">today</text>
-          </>}
-    </svg>
+          ))
+        ) : (
+          buckets.map((b, i) => {
+            const cx = padL + i * gw + gw / 2;
+            const bw = isMonthly ? Math.min(gw * 0.28, 46) : Math.max(gw - 2, 1.5);
+            return (
+              <g key={i}>
+                {isMonthly ? (
+                  <>
+                    <rect x={cx - bw - 2} y={y(b.rev)} width={bw} height={padT + ih - y(b.rev)} rx="3.5" fill="var(--color-accent)" opacity=".82"
+                      onMouseMove={(e) => show(e, tipFor(b))} onMouseLeave={hide} />
+                    <rect x={cx + 2} y={y(b.profit)} width={bw} height={padT + ih - y(b.profit)} rx="3.5" fill="var(--color-s-profit)" opacity=".88"
+                      onMouseMove={(e) => show(e, tipFor(b))} onMouseLeave={hide} />
+                    <text x={cx - bw / 2 - 2} y={y(b.rev) - 5} textAnchor="middle" fontSize="10" fontWeight="700" fill="var(--color-ink)" fontFamily="var(--font-mono)">{$(b.rev)}</text>
+                    <text x={cx + bw / 2 + 2} y={y(b.profit) - 5} textAnchor="middle" fontSize="10" fontWeight="700" fill="var(--color-s-profit)" fontFamily="var(--font-mono)">{$(b.profit)}</text>
+                  </>
+                ) : b.rev > 0 && (
+                  <>
+                    <rect x={cx - bw / 2} y={y(b.rev)} width={bw} height={padT + ih - y(b.rev)} rx="2" fill="var(--color-accent)" opacity=".82"
+                      onMouseMove={(e) => show(e, tipFor(b))} onMouseLeave={hide} />
+                    <text x={cx + 3} y={y(b.rev) - 6} fontSize="8.5" fontWeight="700" fill="var(--color-ink)" fontFamily="var(--font-mono)"
+                      transform={`rotate(-55 ${cx + 3} ${y(b.rev) - 6})`}>{$(b.rev)}</text>
+                  </>
+                )}
+              </g>
+            );
+          })
+        )}
+        {isMonthly ? buckets.map((b, i) => (
+          <g key={b.label}>
+            <text x={padL + i * gw + gw / 2} y={H - 16} textAnchor="middle" fontSize="10.5" fontWeight="700" fill="var(--color-mut)">{b.label}{b.partial ? "*" : ""}</text>
+            <text x={padL + i * gw + gw / 2} y={H - 4} textAnchor="middle" fontSize="9" fill="var(--color-mut)" fontFamily="var(--font-mono)">{b.orders} orders</text>
+          </g>
+        )) : (
+          buckets.map((b, i) => (i % 5 === 0 || i === buckets.length - 1) && (
+            <text key={i} x={padL + i * gw + gw / 2} y={H - 4} textAnchor="middle" fontSize="8.5" fill="var(--color-mut)" fontFamily="var(--font-mono)">{b.label}</text>
+          ))
+        )}
+        {isMonthly && <text x={W - padR} y={padT - 6} textAnchor="end" fontSize="9" fill="var(--color-mut)">* current month, still filling</text>}
+      </svg>
+    </>
   );
 }
 
@@ -382,29 +423,36 @@ function DollarBar({ t }: { t: Totals }) {
 }
 
 function SpendChart({ weeks }: { weeks: { weekStart: string; spendMinor: number }[] }) {
+  const { show, hide, node } = useTip();
   if (weeks.length === 0 || weeks.every((w) => w.spendMinor === 0))
     return <p className="py-3 text-center text-sm text-mut">No material purchases recorded in this window.</p>;
-  const W = 300, H = 110, padL = 6, padB = 16, padT = 20;
+  const W = 300, H = 116, padL = 6, padB = 16, padT = 24;
   const iw = W - padL * 2, ih = H - padT - padB;
-  const max = Math.max(...weeks.map((w) => w.spendMinor)) * 1.15;
+  const max = Math.max(...weeks.map((w) => w.spendMinor)) * 1.25;
   const bw = iw / weeks.length;
   const total = weeks.reduce((a, w) => a + w.spendMinor, 0);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Weekly purchase spend">
-      <text x={padL} y={10} fontSize="9" fill="var(--color-mut)" fontFamily="var(--font-mono)">total {$(total)} this window</text>
-      {weeks.map((w, i) => w.spendMinor > 0 && (
-        <rect key={w.weekStart} x={padL + i * bw + 2} y={padT + ih - (w.spendMinor / max) * ih} width={Math.max(bw - 4, 2)} height={(w.spendMinor / max) * ih} rx="2.5" fill="var(--color-s-mat)" opacity=".85">
-          <title>wk of {w.weekStart} — {$(w.spendMinor)} in materials</title>
-        </rect>
-      ))}
-      <line x1={padL} x2={W - padL} y1={padT + ih} y2={padT + ih} stroke="var(--color-line)" />
-      <text x={padL} y={H - 3} fontSize="9" fill="var(--color-mut)">{weeks[0].weekStart}</text>
-      <text x={W - padL} y={H - 3} textAnchor="end" fontSize="9" fill="var(--color-mut)">now</text>
-    </svg>
+    <>
+      {node}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Weekly purchase spend">
+        <text x={padL} y={10} fontSize="9" fill="var(--color-mut)" fontFamily="var(--font-mono)">total {$(total)} this window</text>
+        {weeks.map((w, i) => w.spendMinor > 0 && (
+          <g key={w.weekStart}>
+            <rect x={padL + i * bw + 2} y={padT + ih - (w.spendMinor / max) * ih} width={Math.max(bw - 4, 2)} height={(w.spendMinor / max) * ih} rx="2.5" fill="var(--color-s-mat)" opacity=".85"
+              onMouseMove={(e) => show(e, [`wk of ${w.weekStart}`, `${$(w.spendMinor)} in materials`])} onMouseLeave={hide} />
+            <text x={padL + i * bw + 2 + Math.max(bw - 4, 2) / 2} y={padT + ih - (w.spendMinor / max) * ih - 4} textAnchor="middle" fontSize="8.5" fontWeight="700" fill="var(--color-ink)" fontFamily="var(--font-mono)">{$(w.spendMinor)}</text>
+          </g>
+        ))}
+        <line x1={padL} x2={W - padL} y1={padT + ih} y2={padT + ih} stroke="var(--color-line)" />
+        <text x={padL} y={H - 3} fontSize="9" fill="var(--color-mut)">{weeks[0].weekStart}</text>
+        <text x={W - padL} y={H - 3} textAnchor="end" fontSize="9" fill="var(--color-mut)">now</text>
+      </svg>
+    </>
   );
 }
 
 function StageChart({ lanes }: { lanes: StatsResponse["lanes"] }) {
+  const { show, hide, node } = useTip();
   const rows = lanes.filter((l) => l.samplesHours.length > 0);
   if (rows.length === 0) return <p className="py-3 text-center text-sm text-mut">No stage history yet — dwell times appear as orders move lanes.</p>;
   const W = 640, rowH = 44, top = 14, padL = 118, padR = 20;
@@ -413,54 +461,60 @@ function StageChart({ lanes }: { lanes: StatsResponse["lanes"] }) {
   const x = (h: number) => padL + (Math.min(h / 24, maxD) / maxD) * (W - padL - padR);
   const q = (s: number[], p: number) => s[Math.floor(p * (s.length - 1))];
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Dwell time distribution per lane">
-      {Array.from({ length: maxD }, (_, i) => i + 1).map((dd) => (
-        <g key={dd}>
-          <line x1={x(dd * 24)} x2={x(dd * 24)} y1={top - 4} y2={top + rowH * rows.length} stroke="var(--color-line)" opacity=".6" />
-          <text x={x(dd * 24)} y={top + rowH * rows.length + 13} textAnchor="middle" fontSize="9" fill="var(--color-mut)" fontFamily="var(--font-mono)">{dd} d</text>
-        </g>
-      ))}
-      {rows.map((l, r) => {
-        const cy = top + r * rowH + rowH / 2;
-        const s = [...l.samplesHours].sort((a, b) => a - b);
-        return (
-          <g key={l.name}>
-            <text x={padL - 10} y={cy + 4} textAnchor="end" fontSize="11.5" fontWeight="600" fill="var(--color-ink)">{l.name}</text>
-            <rect x={x(q(s, 0.25))} y={cy - 8} width={Math.max(x(q(s, 0.75)) - x(q(s, 0.25)), 3)} height="16" rx="5" fill="var(--color-accent)" opacity=".16">
-              <title>{l.name}: middle 50% sit {(q(s, 0.25) / 24).toFixed(1)}–{(q(s, 0.75) / 24).toFixed(1)} days</title>
-            </rect>
-            {l.samplesHours.map((h, i) => (
-              <circle key={i} cx={x(h)} cy={cy + ((i % 5) - 2) * 2.6} r="2.4" fill="var(--color-accent)" opacity=".5">
-                <title>one order — {(h / 24).toFixed(1)} d in {l.name}</title>
-              </circle>
-            ))}
-            <path d={`M ${x(l.avgHours)} ${cy - 7} l 5.5 7 l -5.5 7 l -5.5 -7 Z`} fill="var(--color-ink)">
-              <title>{l.name} average {(l.avgHours / 24).toFixed(1)} d</title>
-            </path>
-            <text x={x(l.avgHours) + 9} y={cy - 9} fontSize="10" fontWeight="700" fill="var(--color-ink)" fontFamily="var(--font-mono)">{(l.avgHours / 24).toFixed(1)} d avg</text>
+    <>
+      {node}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Dwell time distribution per lane">
+        {Array.from({ length: maxD }, (_, i) => i + 1).map((dd) => (
+          <g key={dd}>
+            <line x1={x(dd * 24)} x2={x(dd * 24)} y1={top - 4} y2={top + rowH * rows.length} stroke="var(--color-line)" opacity=".6" />
+            <text x={x(dd * 24)} y={top + rowH * rows.length + 13} textAnchor="middle" fontSize="9" fill="var(--color-mut)" fontFamily="var(--font-mono)">{dd} d</text>
           </g>
-        );
-      })}
-    </svg>
+        ))}
+        {rows.map((l, r) => {
+          const cy = top + r * rowH + rowH / 2;
+          const s = [...l.samplesHours].sort((a, b) => a - b);
+          return (
+            <g key={l.name}>
+              <text x={padL - 10} y={cy + 4} textAnchor="end" fontSize="11.5" fontWeight="600" fill="var(--color-ink)">{l.name}</text>
+              <rect x={x(q(s, 0.25))} y={cy - 8} width={Math.max(x(q(s, 0.75)) - x(q(s, 0.25)), 3)} height="16" rx="5" fill="var(--color-accent)" opacity=".16"
+                onMouseMove={(e) => show(e, [`${l.name}: middle 50%`, `${(q(s, 0.25) / 24).toFixed(1)}–${(q(s, 0.75) / 24).toFixed(1)} days`])} onMouseLeave={hide} />
+              {l.samplesHours.map((h, i) => (
+                <circle key={i} cx={x(h)} cy={cy + ((i % 5) - 2) * 2.6} r="2.4" fill="var(--color-accent)" opacity=".5"
+                  onMouseMove={(e) => show(e, [`one order — ${(h / 24).toFixed(1)} d in ${l.name}`])} onMouseLeave={hide} />
+              ))}
+              <path d={`M ${x(l.avgHours)} ${cy - 7} l 5.5 7 l -5.5 7 l -5.5 -7 Z`} fill="var(--color-ink)"
+                onMouseMove={(e) => show(e, [`${l.name} average ${(l.avgHours / 24).toFixed(1)} d`])} onMouseLeave={hide} />
+              <text x={x(l.avgHours) + 9} y={cy - 9} fontSize="10" fontWeight="700" fill="var(--color-ink)" fontFamily="var(--font-mono)">{(l.avgHours / 24).toFixed(1)} d avg</text>
+            </g>
+          );
+        })}
+      </svg>
+    </>
   );
 }
 
 function ThruChart({ weeks }: { weeks: number[] }) {
+  const { show, hide, node } = useTip();
   if (weeks.length < 2) return <p className="py-3 text-center text-sm text-mut">Not enough weeks yet.</p>;
-  const W = 640, H = 100, padL = 30, padB = 16, padT = 10, padR = 44;
+  const W = 640, H = 104, padL = 30, padB = 16, padT = 14, padR = 44;
   const iw = W - padL - padR, ih = H - padT - padB;
-  const max = Math.max(...weeks, 1) * 1.2;
+  const max = Math.max(...weeks, 1) * 1.25;
   const x = (i: number) => padL + (i / (weeks.length - 1)) * iw;
   const y = (v: number) => padT + ih - (v / max) * ih;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Orders per week">
-      <line x1={padL} x2={W - padR} y1={padT + ih} y2={padT + ih} stroke="var(--color-line)" />
-      <polyline points={weeks.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke="var(--color-accent)" strokeWidth="2.2" strokeLinejoin="round" />
-      {weeks.map((v, i) => (
-        <circle key={i} cx={x(i)} cy={y(v)} r="6.5" fill="transparent"><title>{v} orders that week</title></circle>
-      ))}
-      <circle cx={x(weeks.length - 1)} cy={y(weeks[weeks.length - 1])} r="3.2" fill="var(--color-accent)" />
-      <text x={W - padR + 4} y={y(weeks[weeks.length - 1]) + 3} fontSize="10" fontWeight="700" fill="var(--color-accent)" fontFamily="var(--font-mono)">{weeks[weeks.length - 1]}/wk</text>
-    </svg>
+    <>
+      {node}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Orders per week">
+        <line x1={padL} x2={W - padR} y1={padT + ih} y2={padT + ih} stroke="var(--color-line)" />
+        <polyline points={weeks.map((v, i) => `${x(i)},${y(v)}`).join(" ")} fill="none" stroke="var(--color-accent)" strokeWidth="2.2" strokeLinejoin="round" />
+        {weeks.map((v, i) => (
+          <g key={i}>
+            <circle cx={x(i)} cy={y(v)} r="3" fill="var(--color-accent)"
+              onMouseMove={(e) => show(e, [`${v} orders that week`])} onMouseLeave={hide} />
+            <text x={x(i)} y={y(v) - 7} textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--color-ink)" fontFamily="var(--font-mono)">{v}</text>
+          </g>
+        ))}
+      </svg>
+    </>
   );
 }
