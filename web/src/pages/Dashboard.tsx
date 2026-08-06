@@ -15,6 +15,8 @@ import { MaterialGauge } from "../inventory/Gauge";
 import { MaterialIcon } from "../inventory/MaterialIcon";
 import { MaterialForm } from "../inventory/MaterialForm";
 import { MaterialDetailDrawer } from "../inventory/MaterialDetail";
+import { WeighInSheet, driftBand } from "../inventory/WeighInSheet";
+import { Scale } from "lucide-react";
 
 /** Inventory dashboard — first pass of the locked Inventory UX concept:
  *  summary strip (one segmented card), category shelves of gauges,
@@ -52,6 +54,12 @@ export function DashboardPage() {
   });
   const [editing, setEditing] = useState<Material | null>(null);
 
+  // Shelf audit (vault: Inventory UX, weigh-in locked 2026-08-06): session
+  // over the filament wall; gauges open the weigh sheet instead of the detail.
+  const [auditing, setAuditing] = useState(false);
+  const [audit, setAudit] = useState<Record<number, { measured: number; delta: number } | "skipped">>({});
+  const [weighFor, setWeighFor] = useState<Material | null>(null);
+
   const [query, setQuery] = useState("");
   const [catFilter, setCatFilter] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
@@ -87,10 +95,18 @@ export function DashboardPage() {
 
   return (
     <AppShell active="Inventory" actions={
-      <button type="button" onClick={() => setCreating(true)}
-        className="rounded-md bg-accent px-3.5 py-1.5 text-sm font-semibold text-white hover:opacity-90">
-        + Material
-      </button>
+      <>
+        {all.some((m) => m.category === "filament") && (
+          <button type="button" onClick={() => { setAuditing(!auditing); setAudit({}); }} aria-pressed={auditing}
+            className={`flex items-center gap-1.5 rounded-md border px-3.5 py-1.5 text-xs font-semibold ${auditing ? "border-accent bg-accent/10 text-accent" : "border-line text-ink2 hover:border-accent hover:text-accent"}`}>
+            <Scale size={14} /> {auditing ? "End audit" : "Audit shelf"}
+          </button>
+        )}
+        <button type="button" onClick={() => setCreating(true)}
+          className="rounded-md bg-accent px-3.5 py-1.5 text-sm font-semibold text-white hover:opacity-90">
+          + Material
+        </button>
+      </>
     }>
 
       {/* Summary strip: one segmented card, label + number only */}
@@ -100,6 +116,51 @@ export function DashboardPage() {
         <Stat label="Healthy" value={all.length - critical.length - low.length} tone="good" divider />
         <Stat label="Materials" value={all.length} divider />
       </div>
+
+      {/* Audit session: progress + running result over the filament wall */}
+      {auditing && (() => {
+        const pool = all.filter((m) => m.category === "filament" && !m.archived);
+        const touched = pool.filter((m) => audit[m.id] != null);
+        const weighed = pool.filter((m) => audit[m.id] != null && audit[m.id] !== "skipped");
+        const net = weighed.reduce((a, m) => a + (audit[m.id] as { delta: number }).delta, 0);
+        return (
+          <Card className="mt-5">
+            <div className="flex flex-wrap items-center gap-3.5">
+              <b className="text-[13px]">
+                {weighed.length} of {pool.length} weighed
+                {touched.length - weighed.length > 0 && ` · ${touched.length - weighed.length} skipped`}
+              </b>
+              <div className="h-2 min-w-40 flex-1 overflow-hidden rounded-full bg-panel2">
+                <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${(touched.length / Math.max(pool.length, 1)) * 100}%` }} />
+              </div>
+              {weighed.length > 0 && (
+                <span className="font-mono text-xs text-ink2">
+                  net correction <b className={net < 0 ? "text-crit" : "text-good"}>{net >= 0 ? "+" : "−"}{formatQty(Math.abs(net))} g</b>
+                </span>
+              )}
+              <span className="text-[10.5px] text-mut">manual entry — tap a spool to weigh it</span>
+            </div>
+            {weighed.length > 0 && (
+              <div className="mt-2.5 divide-y divide-line/60 border-t border-line/60 text-[12.5px]">
+                {weighed.map((m) => {
+                  const a = audit[m.id] as { measured: number; delta: number };
+                  const [tone, label] = driftBand(Math.abs(a.delta), m.fullQuantity ?? 1000);
+                  const toneCls = { good: "bg-good/10 text-good", warn: "bg-warn/10 text-warn", crit: "bg-crit/10 text-crit" }[tone];
+                  return (
+                    <div key={m.id} className="flex flex-wrap items-center gap-2.5 py-1.5">
+                      <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tracking-wider ${toneCls}`}>{label}</span>
+                      <span className="font-mono text-xs text-ink2">
+                        {formatQty(a.measured - a.delta)} → {formatQty(a.measured)} g ({a.delta >= 0 ? "+" : "−"}{formatQty(Math.abs(a.delta))})
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        );
+      })()}
 
       {/* Filter & sort bar — applies to the wall and the purchasing panel */}
       {all.length > 0 && (
@@ -198,9 +259,20 @@ export function DashboardPage() {
           <div className="grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-x-2 gap-y-1 rounded-xl border border-line bg-panel p-3 shadow-sm">
             {visible
               .filter((m) => m.category === cat)
-              .map((m) => (
-                <MaterialGauge key={m.id} m={m} onClick={() => setDetailId(m.id)} />
-              ))}
+              .map((m) => {
+                const weighable = auditing && m.category === "filament" && !m.archived;
+                const a = audit[m.id];
+                return (
+                  <div key={m.id} className="relative">
+                    {weighable && a != null && (
+                      <span className={`absolute top-1 right-1 z-10 rounded-full px-1.5 py-0.5 text-[8.5px] font-extrabold tracking-wider ${a === "skipped" ? "bg-panel2 text-mut" : "bg-good/15 text-good"}`}>
+                        {a === "skipped" ? "SKIPPED" : "✓ WEIGHED"}
+                      </span>
+                    )}
+                    <MaterialGauge m={m} onClick={() => (weighable ? setWeighFor(m) : setDetailId(m.id))} />
+                  </div>
+                );
+              })}
           </div>
         </section>
       ))}
@@ -247,6 +319,14 @@ export function DashboardPage() {
         </section>
       )}
 
+      {weighFor && (
+        <WeighInSheet
+          material={weighFor}
+          onRecorded={(measured, delta) => { setAudit((a) => ({ ...a, [weighFor.id]: { measured, delta } })); setWeighFor(null); }}
+          onSkip={() => { setAudit((a) => ({ ...a, [weighFor.id]: "skipped" })); setWeighFor(null); }}
+          onClose={() => setWeighFor(null)}
+        />
+      )}
       {creating && <MaterialForm categories={categories} onClose={() => setCreating(false)} />}
       {editing && (
         <MaterialForm

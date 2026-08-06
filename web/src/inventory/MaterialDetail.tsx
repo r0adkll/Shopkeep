@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatCost, formatQty, inventoryApi, materialColor, type TxnKind } from "./api";
-import { Archive, ArchiveRestore, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, Scale, Trash2, X } from "lucide-react";
 import { MaterialIcon } from "./MaterialIcon";
+import { WeighInSheet } from "./WeighInSheet";
 import { Button, ErrorText, Field } from "../ui";
 
 /** Detail drawer: ledger history chart (step line straight from the ledger),
@@ -40,6 +41,7 @@ export function MaterialDetailDrawer({
   const [delta, setDelta] = useState("");
   const [kind, setKind] = useState<TxnKind>("PURCHASE");
   const [note, setNote] = useState("");
+  const [weighing, setWeighing] = useState(false);
 
   const transact = useMutation({
     mutationFn: () => {
@@ -96,6 +98,12 @@ export function MaterialDetailDrawer({
               >
                 Order ↗
               </a>
+            )}
+            {m.category === "filament" && !m.archived && (
+              <button type="button" onClick={() => setWeighing(true)} title="Put the spool on a scale — Shopkeep does the tare math"
+                className="flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-sm text-ink2 hover:border-accent hover:text-ink">
+                <Scale size={14} /> Weigh in
+              </button>
             )}
             <button type="button" onClick={onEdit} className="rounded-md border border-line px-3 py-1.5 text-sm text-ink2 hover:border-accent hover:text-ink">
               Edit
@@ -209,6 +217,12 @@ export function MaterialDetailDrawer({
           {removeError && <span className="text-xs font-medium text-crit">{removeError}</span>}
         </div>
       </div>
+      {weighing && (
+        // stop clicks bubbling to the drawer's close-on-overlay handler
+        <div onClick={(e) => e.stopPropagation()}>
+          <WeighInSheet material={m} onRecorded={() => setWeighing(false)} onClose={() => setWeighing(false)} />
+        </div>
+      )}
     </div>
   );
 }

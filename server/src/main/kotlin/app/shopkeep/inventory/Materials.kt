@@ -137,6 +137,13 @@ class MaterialRepository {
         MaterialsTable.insert { apply(it, input) } get MaterialsTable.id
     }
 
+    /** Targeted attribute write (e.g. a weigh-in saving the measured tare). */
+    suspend fun setAttribute(id: Long, key: String, value: String): Boolean = dbQuery {
+        val current = MaterialsTable.selectAll().where { MaterialsTable.id eq id }
+            .singleOrNull()?.get(MaterialsTable.attributes) ?: return@dbQuery false
+        MaterialsTable.update({ MaterialsTable.id eq id }) { it[attributes] = current + (key to value) } > 0
+    }
+
     suspend fun update(id: Long, input: MaterialInput): Boolean = dbQuery {
         MaterialsTable.update({ MaterialsTable.id eq id }) { apply(it, input) } > 0
     }

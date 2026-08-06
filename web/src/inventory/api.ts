@@ -140,6 +140,8 @@ export const inventoryApi = {
       body: JSON.stringify({ delta, kind, note }),
     }),
   purchasing: () => req<Material[]>("/purchasing"),
+  weighIn: (id: number, body: { grossGrams: number; tareGrams: number; saveTare?: boolean; markEmpty?: boolean }) =>
+    req<MaterialDetail>(`/materials/${id}/weigh-in`, { method: "POST", body: JSON.stringify(body) }),
   filamentDbSearch: (q: string, f: { brand?: string | null; material?: string | null; hideDiscontinued?: boolean }) =>
     req<CatalogFilament[]>(
       `/filamentdb/search?q=${encodeURIComponent(q)}` +
