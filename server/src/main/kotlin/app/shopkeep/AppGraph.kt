@@ -46,6 +46,7 @@ interface AppGraph {
     val vendorPrefillService: app.shopkeep.inventory.VendorPrefillService
     val filamentCatalog: app.shopkeep.inventory.FilamentCatalogRepository
     val packingSlipService: app.shopkeep.fulfillment.PackingSlipService
+    val statsService: app.shopkeep.integrations.StatsService
 
     @Provides
     @SingleIn(AppScope::class)

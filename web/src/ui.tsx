@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ClipboardList, Hammer, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, Tags, X } from "lucide-react";
+import { Boxes, ChartNoAxesColumn,
+  ClipboardList, Hammer, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, Tags, X } from "lucide-react";
 import { api } from "./api";
 
 /** Minimal primitives in the concept's visual language; the full shadcn/ui
@@ -113,6 +114,7 @@ const NAV = [
   { label: "Products", to: "/products", Icon: Hammer },
   { label: "Listings", to: "/listings", Icon: Tags },
   { label: "Orders", to: "/orders", Icon: ClipboardList },
+  { label: "Stats", to: "/stats", Icon: ChartNoAxesColumn },
   { label: "Settings", to: "/settings", Icon: Settings },
 ] as const;
 export type NavLabel = (typeof NAV)[number]["label"];

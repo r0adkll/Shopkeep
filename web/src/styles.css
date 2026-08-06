@@ -14,6 +14,10 @@
   --color-mut: #8a9098;
   --color-line: #e3e3de;
   --color-accent: #3563a8;
+  --color-s-profit: #0e9888;
+  --color-s-mat: #c77c2b;
+  --color-s-fees: #b3538f;
+  --color-s-labor: #7a8296;
   --color-good: #2e9e5b;
   --color-warn: #dd9a0a;
   --color-crit: #c93b3b;
@@ -33,6 +37,10 @@
     --color-mut: #7c828b;
     --color-line: #31353c;
     --color-accent: #7aa4e0;
+    --color-s-profit: #33c2b0;
+    --color-s-mat: #dfa05c;
+    --color-s-fees: #d585b7;
+    --color-s-labor: #8a93a8;
     --color-good: #339a5e;
     --color-warn: #b78708;
     --color-crit: #c94040;
