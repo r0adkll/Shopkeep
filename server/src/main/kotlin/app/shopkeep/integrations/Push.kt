@@ -162,8 +162,10 @@ class PushService(
             val changes = buildChanges(l, l.input.pushShapeActive(archived), current, baselineFor(id, etsyId))
             persistState(id, changes)
             dbQuery { ListingsTable.update({ ListingsTable.id eq id }) { it[platformState] = current.state } }
-            // self-heal: stamp missing axis property ids from live inventory
-            // (imports staged before id capture, or hand-built axes)
+            // self-heal: stamp axis property ids from live inventory — fills
+            // missing ids (imports staged before id capture) AND corrects
+            // stale ones (ids drift when the listing is re-shaped on Etsy; a
+            // wrong id sends order values to the wrong axis at match time)
             val livePropIds = current.inventory?.products.orEmpty()
                 .flatMap { it.propertyValues }
                 .filter { it.propertyId != null }
@@ -171,9 +173,9 @@ class PushService(
             if (livePropIds.isNotEmpty()) dbQuery {
                 app.shopkeep.listings.ListingAxesTable.selectAll()
                     .where { app.shopkeep.listings.ListingAxesTable.listingId eq id }
-                    .filter { it[app.shopkeep.listings.ListingAxesTable.etsyPropertyId] == null }
                     .forEach { a ->
-                        livePropIds[a[app.shopkeep.listings.ListingAxesTable.displayName].lowercase()]?.let { pid ->
+                        val pid = livePropIds[a[app.shopkeep.listings.ListingAxesTable.displayName].lowercase()]
+                        if (pid != null && a[app.shopkeep.listings.ListingAxesTable.etsyPropertyId] != pid) {
                             app.shopkeep.listings.ListingAxesTable.update(
                                 { app.shopkeep.listings.ListingAxesTable.id eq a[app.shopkeep.listings.ListingAxesTable.id] },
                             ) { it[etsyPropertyId] = pid }

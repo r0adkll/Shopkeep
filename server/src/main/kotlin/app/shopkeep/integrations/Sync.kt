@@ -734,7 +734,17 @@ class SyncService(
             // listing says "Primary color", the order says "Color"), then
             // name, then unambiguous value membership (historic lines whose
             // ids predate tracking).
-            val varVal = axis.etsyPropertyId?.let { pid -> orderValues.firstOrNull { it.propertyId == pid }?.value }
+            fun mappedOn(a: app.shopkeep.listings.AxisInput, v: String) =
+                a.values.any { it.platformValue.equals(v, true) || it.displayLabel.equals(v, true) } ||
+                    resolutions.any { it.axis.equals(a.displayName, true) && it.value.equals(v, true) }
+            val byPid = axis.etsyPropertyId?.let { pid -> orderValues.firstOrNull { it.propertyId == pid }?.value }
+            // Stale-id guard: stored property ids drift when a listing is
+            // re-shaped on Etsy. If the id-matched value clearly belongs to a
+            // DIFFERENT axis and not this one, distrust the id and fall back
+            // to name/membership; sync-state refresh re-heals the stored ids.
+            val pidStale = byPid != null && !mappedOn(axis, byPid) &&
+                listing.input.axes.any { it !== axis && mappedOn(it, byPid) }
+            val varVal = (if (pidStale) null else byPid)
                 ?: orderValues.firstOrNull { it.name.equals(axis.displayName, ignoreCase = true) }?.value
                 ?: uniqueValueMatch(axis, listing.input.axes, orderValues)
             if (varVal == null) { reasons += "Etsy sent no value for axis “${axis.displayName}”"; continue }
@@ -885,6 +895,52 @@ class SyncService(
                 it[fromCategory] = null
                 it[toCategory] = if (stillUnmatched) "line $how" else if (reserved) "$how — materials reserved" else how
             }
+        }
+        if (reserved) ensurePackagingReserved(order[OrdersTable.id])
+    }
+
+    /** D14: packaging is order-level and quantity-banded, but the ingest-time
+     *  packaging pass only sees lines that matched immediately. Late matches
+     *  (manual, re-resolve, retro) land here instead: reconcile the order's
+     *  packaging reservations against its currently-matched units — the net
+     *  of existing packaging rows moves to whatever the bands now say. */
+    private suspend fun ensurePackagingReserved(orderId: Long) {
+        val order = dbQuery { OrdersTable.selectAll().where { OrdersTable.id eq orderId }.singleOrNull() } ?: return
+        if (order[OrdersTable.completedAt] != null) return
+        if (order[OrdersTable.platformStatus] in setOf("canceled", "fully refunded")) return
+        val note = "Order #${order[OrdersTable.platformOrderId]} packaging"
+
+        val units = mutableMapOf<Long, Int>()
+        dbQuery { OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq orderId }.toList() }.forEach { l ->
+            val listingId = l[OrderLinesTable.listingConfigurationId]?.let { c ->
+                dbQuery {
+                    ListingConfigurationsTable.selectAll().where { ListingConfigurationsTable.id eq c }
+                        .singleOrNull()?.get(ListingConfigurationsTable.listingId)
+                }
+            } ?: l[OrderLinesTable.matchedListingId] ?: return@forEach
+            units[listingId] = (units[listingId] ?: 0) + l[OrderLinesTable.quantity]
+        }
+        val desired = mutableMapOf<Long, Double>()
+        var adhoc = false
+        for ((listingId, u) in units) {
+            val profileId = listings.get(listingId)?.input?.packagingProfileId ?: continue
+            val band = listings.resolvePackaging(profileId, u).band ?: continue
+            if (band.kind == "adhoc") adhoc = true
+            for (m in band.materials) desired[m.materialId] = (desired[m.materialId] ?: 0.0) + m.quantity
+        }
+        if (adhoc) dbQuery { OrdersTable.update({ OrdersTable.id eq orderId }) { it[flagAdhoc] = true } }
+
+        val net = dbQuery {
+            app.shopkeep.inventory.InventoryTransactionsTable.selectAll()
+                .where { app.shopkeep.inventory.InventoryTransactionsTable.note eq note }
+                .groupBy { it[app.shopkeep.inventory.InventoryTransactionsTable.materialId] }
+                .mapValues { (_, t) -> t.sumOf { it[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble() } }
+        }
+        for (matId in desired.keys + net.keys) {
+            val want = -(desired[matId] ?: 0.0) // reservations are negative
+            val delta = want - (net[matId] ?: 0.0)
+            if (kotlin.math.abs(delta) < 0.0005) continue
+            materials.recordTransaction(matId, delta, if (delta < 0) TxnKind.RESERVATION else TxnKind.RELEASE, note, null)
         }
     }
 
