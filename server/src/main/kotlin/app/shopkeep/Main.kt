@@ -113,6 +113,9 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
 
     // Background storefront poll (vault: Architecture sync loop). Failures log; never crash.
     launch {
+        runCatching { graph.syncService.reconcileOpenOrderReservations() }
+            .onSuccess { log.info("Order-level reservation sweep: {} open orders reconciled", it) }
+            .onFailure { log.warn("Reservation sweep failed: {}", it.message) }
         delay(30_000)
         while (true) {
             runCatching { graph.syncService.syncAll() }

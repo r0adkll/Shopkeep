@@ -1052,6 +1052,21 @@ class SyncService(
     /** Re-run matching on demand: backfill platform listing ids that early
      *  ingests never stamped (from the Etsy receipt), then retro-match every
      *  unmatched line whose platform listing resolves to a canonical listing. */
+    /** Boot sweep: reconcile order-level reservations (packaging bands +
+     *  per-order extras) across every open order. Net-based and cheap at
+     *  shop scale, so it runs at every startup — heals orders matched before
+     *  these reservations existed, and any future drift. */
+    suspend fun reconcileOpenOrderReservations(): Int {
+        val ids = dbQuery {
+            OrdersTable.selectAll().where { OrdersTable.archivedAt.isNull() }.toList()
+        }.filter {
+            it[OrdersTable.completedAt] == null &&
+                it[OrdersTable.platformStatus] !in setOf("canceled", "fully refunded")
+        }.map { it[OrdersTable.id] }
+        ids.forEach { ensurePackagingReserved(it) }
+        return ids.size
+    }
+
     suspend fun rematchAll(): RematchResult {
         var backfilled = 0
         val missing = dbQuery {
