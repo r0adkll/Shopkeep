@@ -442,6 +442,9 @@ class SyncService(
                     )
                 }
             }
+            // per-order listing extras share packaging's order-level shape —
+            // the reconciler nets against the rows above, so packaging no-ops
+            if (unitsByListing.isNotEmpty()) ensurePackagingReserved(orderId)
 
             // Arrival-only routing (locked queue concept) + flags for card chips.
             val platform = dbQuery {
@@ -803,6 +806,12 @@ class SyncService(
         product.slots.forEach { slot ->
             if (slot.kind == SlotKind.FIXED && slot.fixedMaterialId != null) addBom(slot.fixedMaterialId!!, slot.quantity)
         }
+        // listing extras: per-unit ride the line BOM (×qty downstream);
+        // per-order are order-level like packaging — reconciled once per
+        // order in ensurePackagingReserved, never in a line's BOM
+        for (e in listing.input.extras) {
+            if (e.basis == "per_unit") addBom(e.materialId, e.quantity)
+        }
         // variant adjustments: slot deltas apply to whatever material filled the slot
         variantAdj?.let { adj ->
             adj.slotDeltas.forEach { d ->
@@ -899,16 +908,18 @@ class SyncService(
         if (reserved) ensurePackagingReserved(order[OrdersTable.id])
     }
 
-    /** D14: packaging is order-level and quantity-banded, but the ingest-time
-     *  packaging pass only sees lines that matched immediately. Late matches
-     *  (manual, re-resolve, retro) land here instead: reconcile the order's
-     *  packaging reservations against its currently-matched units — the net
-     *  of existing packaging rows moves to whatever the bands now say. */
+    /** Order-level reservations: packaging bands (D14) and per-order listing
+     *  extras both apply once per order, not per line — and the ingest-time
+     *  pass only sees lines that matched immediately. Every match path lands
+     *  here: reconcile the order's packaging + per-order-extras rows against
+     *  its currently-matched units. Net-based, so it's idempotent and
+     *  re-bands as units change. */
     private suspend fun ensurePackagingReserved(orderId: Long) {
         val order = dbQuery { OrdersTable.selectAll().where { OrdersTable.id eq orderId }.singleOrNull() } ?: return
         if (order[OrdersTable.completedAt] != null) return
         if (order[OrdersTable.platformStatus] in setOf("canceled", "fully refunded")) return
-        val note = "Order #${order[OrdersTable.platformOrderId]} packaging"
+        val packagingNote = "Order #${order[OrdersTable.platformOrderId]} packaging"
+        val extrasNote = "Order #${order[OrdersTable.platformOrderId]} listing extras"
 
         val units = mutableMapOf<Long, Int>()
         dbQuery { OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq orderId }.toList() }.forEach { l ->
@@ -920,28 +931,38 @@ class SyncService(
             } ?: l[OrderLinesTable.matchedListingId] ?: return@forEach
             units[listingId] = (units[listingId] ?: 0) + l[OrderLinesTable.quantity]
         }
-        val desired = mutableMapOf<Long, Double>()
+        val wantPackaging = mutableMapOf<Long, Double>()
+        val wantExtras = mutableMapOf<Long, Double>()
         var adhoc = false
         for ((listingId, u) in units) {
-            val profileId = listings.get(listingId)?.input?.packagingProfileId ?: continue
-            val band = listings.resolvePackaging(profileId, u).band ?: continue
-            if (band.kind == "adhoc") adhoc = true
-            for (m in band.materials) desired[m.materialId] = (desired[m.materialId] ?: 0.0) + m.quantity
+            val input = listings.get(listingId)?.input ?: continue
+            input.packagingProfileId?.let { profileId ->
+                val band = listings.resolvePackaging(profileId, u).band ?: return@let
+                if (band.kind == "adhoc") adhoc = true
+                for (m in band.materials) wantPackaging[m.materialId] = (wantPackaging[m.materialId] ?: 0.0) + m.quantity
+            }
+            for (e in input.extras) {
+                if (e.basis == "per_order") wantExtras[e.materialId] = (wantExtras[e.materialId] ?: 0.0) + e.quantity
+            }
         }
         if (adhoc) dbQuery { OrdersTable.update({ OrdersTable.id eq orderId }) { it[flagAdhoc] = true } }
 
-        val net = dbQuery {
-            app.shopkeep.inventory.InventoryTransactionsTable.selectAll()
-                .where { app.shopkeep.inventory.InventoryTransactionsTable.note eq note }
-                .groupBy { it[app.shopkeep.inventory.InventoryTransactionsTable.materialId] }
-                .mapValues { (_, t) -> t.sumOf { it[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble() } }
+        suspend fun reconcile(desired: Map<Long, Double>, note: String) {
+            val net = dbQuery {
+                app.shopkeep.inventory.InventoryTransactionsTable.selectAll()
+                    .where { app.shopkeep.inventory.InventoryTransactionsTable.note eq note }
+                    .groupBy { it[app.shopkeep.inventory.InventoryTransactionsTable.materialId] }
+                    .mapValues { (_, t) -> t.sumOf { it[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble() } }
+            }
+            for (matId in desired.keys + net.keys) {
+                val want = -(desired[matId] ?: 0.0) // reservations are negative
+                val delta = want - (net[matId] ?: 0.0)
+                if (kotlin.math.abs(delta) < 0.0005) continue
+                materials.recordTransaction(matId, delta, if (delta < 0) TxnKind.RESERVATION else TxnKind.RELEASE, note, null)
+            }
         }
-        for (matId in desired.keys + net.keys) {
-            val want = -(desired[matId] ?: 0.0) // reservations are negative
-            val delta = want - (net[matId] ?: 0.0)
-            if (kotlin.math.abs(delta) < 0.0005) continue
-            materials.recordTransaction(matId, delta, if (delta < 0) TxnKind.RESERVATION else TxnKind.RELEASE, note, null)
-        }
+        reconcile(wantPackaging, packagingNote)
+        reconcile(wantExtras, extrasNote)
     }
 
     /** Manual match: resolve one line against a chosen listing; optionally
@@ -1096,7 +1117,9 @@ class SyncService(
             reserve(materialId, slot.quantity * quantity)
         }
         for (extra in listing.input.extras) {
-            reserve(extra.materialId, if (extra.basis == "per_unit") extra.quantity * quantity else extra.quantity)
+            // per-order extras are order-level (once per order, not per line)
+            // — reconciled in ensurePackagingReserved alongside packaging
+            if (extra.basis == "per_unit") reserve(extra.materialId, extra.quantity * quantity)
         }
         return short
     }
