@@ -1243,6 +1243,49 @@ function ExtrasEditor({
   // -1 = adding a new extra; >= 0 = swapping the material on that row
   const [picking, setPicking] = useState<number | null>(null);
   return (
+    <ExtrasEditorBody extras={extras} materials={materials} onChange={onChange} picking={picking} setPicking={setPicking} />
+  );
+}
+
+/** Numeric input that tolerates in-progress decimals ("1." stays "1." while
+ *  typing) — parsing on every keystroke eats the dot. */
+function QtyInput({ value, onChange, className }: { value: number; onChange: (v: number) => void; className: string }) {
+  const [draft, setDraft] = useState(value ? String(value) : "");
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setDraft(value ? String(value) : "");
+  }, [value, focused]);
+  return (
+    <input
+      value={draft}
+      inputMode="decimal"
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onChange={(e) => {
+        const v = e.target.value;
+        if (!/^\d*\.?\d*$/.test(v)) return;
+        setDraft(v);
+        onChange(parseFloat(v) || 0);
+      }}
+      className={className}
+    />
+  );
+}
+
+function ExtrasEditorBody({
+  extras,
+  materials,
+  onChange,
+  picking,
+  setPicking,
+}: {
+  extras: Extra[];
+  materials: Material[];
+  onChange: (e: Extra[]) => void;
+  picking: number | null;
+  setPicking: (v: number | null) => void;
+}) {
+  return (
     <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
       {extras.map((e, i) => {
         const m = materials.find((x) => x.id === e.materialId);
@@ -1263,9 +1306,9 @@ function ExtrasEditor({
               {m && <span className="text-[10.5px] text-mut">{m.type} · {m.category}</span>}
             </span>
             <span className="ml-auto flex items-center gap-2">
-              <input
-                value={String(e.quantity || "")}
-                onChange={(ev) => onChange(extras.map((x, j) => (j === i ? { ...x, quantity: parseFloat(ev.target.value) || 0 } : x)))}
+              <QtyInput
+                value={e.quantity}
+                onChange={(q) => onChange(extras.map((x, j) => (j === i ? { ...x, quantity: q } : x)))}
                 className="w-16 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
               />
               <span className="text-[10.5px] text-mut">{m?.unit ?? ""}</span>
