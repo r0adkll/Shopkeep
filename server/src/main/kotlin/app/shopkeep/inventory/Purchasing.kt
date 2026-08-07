@@ -51,6 +51,8 @@ data class PanelNeed(
     val estCostMinor: Long,
     /** Set when this row is a manual add (queued) rather than a low-stock nag. */
     val purchaseId: Long? = null,
+    /** Days of stock at the trailing consumption rate; null when usage is quiet. */
+    val daysLeft: Double? = null,
 )
 
 @Serializable
@@ -89,10 +91,15 @@ class PurchaseRepository(private val materials: MaterialRepository) {
         fun unitCost(m: Material) = if (m.costQuantity > 0) m.costMinor / m.costQuantity else 0.0
 
         // low stock nags itself; a material already on order stops nagging
-        val low = mats
-            .filter { it.lowStockThreshold != null && it.status != StockStatus.OK && it.id !in onOrderMatIds }
+        val lowMats = mats.filter { it.lowStockThreshold != null && it.status != StockStatus.OK && it.id !in onOrderMatIds }
+        val rates = materials.consumptionRates(lowMats.map { it.id })
+        val low = lowMats
             .sortedBy { it.stock.available / (it.lowStockThreshold ?: 1.0) }
-            .map { m -> PanelNeed(m, suggested(m), (unitCost(m) * suggested(m)).toLong()) }
+            .map { m ->
+                val rate = rates[m.id] ?: 0.0
+                val days = if (rate > 0.0001 && m.stock.available > 0) m.stock.available / rate else null
+                PanelNeed(m, suggested(m), (unitCost(m) * suggested(m)).toLong(), daysLeft = days?.takeIf { it <= 365 })
+            }
         val lowIds = low.map { it.material.id }.toSet()
         val manual = queued.mapNotNull { row ->
             val m = byId[row[PurchasesTable.materialId]] ?: return@mapNotNull null

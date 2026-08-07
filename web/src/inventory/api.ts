@@ -36,7 +36,15 @@ export type LedgerEntry = {
   createdAt: string | null;
 };
 
-export type MaterialDetail = { material: Material; ledger: LedgerEntry[] };
+export type Forecast = {
+  ratePerDay: number;
+  daysLeft: number;
+  runOutDate: string;
+  orderByDate: string;
+  leadTimeDays: number;
+};
+
+export type MaterialDetail = { material: Material; ledger: LedgerEntry[]; forecast: Forecast | null };
 
 export type PrefillResult = {
   vendorUrl: string;

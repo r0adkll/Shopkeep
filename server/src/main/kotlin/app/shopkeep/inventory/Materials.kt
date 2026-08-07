@@ -196,6 +196,22 @@ class MaterialRepository {
             } get InventoryTransactionsTable.id
         }
 
+    /** Trailing consumption rate (units/day) from actual usage: consumption
+     *  events over the window. Reservations don't count — they're committed,
+     *  not consumed, and already subtracted from available. */
+    suspend fun consumptionRates(ids: Collection<Long>, days: Int = 30): Map<Long, Double> = dbQuery {
+        if (ids.isEmpty()) return@dbQuery emptyMap()
+        val from = OffsetDateTime.now().minusDays(days.toLong())
+        InventoryTransactionsTable.selectAll()
+            .where { InventoryTransactionsTable.materialId inList ids.toList() }
+            .filter {
+                it[InventoryTransactionsTable.kind] == "consumption" &&
+                    (it[InventoryTransactionsTable.createdAt]?.isAfter(from) ?: false)
+            }
+            .groupBy { it[InventoryTransactionsTable.materialId] }
+            .mapValues { (_, rows) -> rows.sumOf { -it[InventoryTransactionsTable.delta].toDouble() }.coerceAtLeast(0.0) / days }
+    }
+
     /** Full ledger, oldest first, with a running on-hand balance for the history chart. */
     suspend fun ledger(materialId: Long): List<LedgerEntry> = dbQuery {
         var running = 0.0

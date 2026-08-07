@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { formatCost, formatQty, inventoryApi, materialColor, type TxnKind } from "./api";
+import { formatCost, formatQty, inventoryApi, materialColor, type Forecast, type LedgerEntry as LedgerEntryT, type TxnKind } from "./api";
 import { Archive, ArchiveRestore, Scale, Trash2, X } from "lucide-react";
 import { MaterialIcon } from "./MaterialIcon";
 import { WeighInSheet } from "./WeighInSheet";
@@ -58,7 +58,7 @@ export function MaterialDetailDrawer({
   });
 
   if (!detail.data) return null;
-  const { material: m, ledger } = detail.data;
+  const { material: m, ledger, forecast } = detail.data;
   const color = materialColor(m);
 
   return (
@@ -131,7 +131,20 @@ export function MaterialDetailDrawer({
           ))}
         </div>
 
-        <HistoryChart points={ledger.map((e) => e.runningOnHand)} threshold={m.lowStockThreshold} />
+        {forecast && (
+          <div className={`mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 rounded-xl px-4 py-2.5 text-[12.5px] ${new Date(forecast.orderByDate) <= new Date() ? "bg-crit/10 text-crit" : "bg-warn/10 text-warn"}`}>
+            <span>
+              burning <b className="font-mono">{forecast.ratePerDay >= 10 ? Math.round(forecast.ratePerDay) : forecast.ratePerDay.toFixed(1)} {m.unit}/day</b>
+              {" "}→ runs out <b>{new Date(forecast.runOutDate + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</b>
+              {" "}(~{Math.round(forecast.daysLeft)} d)
+            </span>
+            <span className="font-semibold">
+              {new Date(forecast.orderByDate) <= new Date() ? "order now" : `order by ${new Date(forecast.orderByDate + "T12:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}`}
+              <span className="ml-1 font-normal opacity-75">({forecast.leadTimeDays} d lead time)</span>
+            </span>
+          </div>
+        )}
+        <HistoryChart ledger={ledger} threshold={m.lowStockThreshold} forecast={forecast} />
 
         <form
           className="mt-5 flex flex-wrap items-end gap-3 rounded-xl border border-line bg-panel2 p-4"
@@ -227,25 +240,52 @@ export function MaterialDetailDrawer({
   );
 }
 
-function HistoryChart({ points, threshold }: { points: number[]; threshold: number | null }) {
-  if (points.length < 2) return null;
-  const W = 560;
-  const H = 120;
-  const pad = 6;
-  const series = [0, ...points];
-  const max = Math.max(...series, threshold ?? 0) * 1.08 || 1;
-  const x = (i: number) => pad + (i / (series.length - 1)) * (W - pad * 2);
-  const y = (v: number) => H - pad - (v / max) * (H - pad * 2);
-  // Step path: horizontal to the next x, then vertical — purchases read as cliffs.
-  let d = `M ${x(0)} ${y(series[0])}`;
-  for (let i = 1; i < series.length; i++) d += ` L ${x(i)} ${y(series[i - 1])} L ${x(i)} ${y(series[i])}`;
+/** Time-based step history with the locked concept's forecast payload: dashed
+ *  depletion line to the trend's zero crossing and the order-by marker
+ *  (run-out minus lead time) — the chart's actionable date. */
+function HistoryChart({ ledger, threshold, forecast }: { ledger: LedgerEntryT[]; threshold: number | null; forecast: Forecast | null }) {
+  const pts = ledger
+    .filter((e) => e.createdAt)
+    .map((e) => ({ t: new Date(e.createdAt!).getTime(), v: e.runningOnHand }));
+  if (pts.length < 2) return null;
+  const W = 560, H = 130, pad = 8, padB = 16;
+  const now = Date.now();
+  const tEnd = forecast ? new Date(forecast.runOutDate + "T12:00").getTime() : now;
+  const t0 = pts[0].t;
+  const span = Math.max(tEnd - t0, 1);
+  const max = Math.max(...pts.map((p) => p.v), threshold ?? 0) * 1.08 || 1;
+  const x = (t: number) => pad + ((t - t0) / span) * (W - pad * 2);
+  const y = (v: number) => H - padB - (v / max) * (H - padB - pad);
+  let d = `M ${x(pts[0].t)} ${y(0)} L ${x(pts[0].t)} ${y(pts[0].v)}`;
+  for (let i = 1; i < pts.length; i++) d += ` L ${x(pts[i].t)} ${y(pts[i - 1].v)} L ${x(pts[i].t)} ${y(pts[i].v)}`;
+  const last = pts[pts.length - 1];
+  d += ` L ${x(now)} ${y(last.v)}`;
+  const orderBy = forecast ? new Date(forecast.orderByDate + "T12:00").getTime() : null;
+  const fmtD = (t: number) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-lg border border-line bg-panel2" aria-label="Stock history">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-lg border border-line bg-panel2" aria-label="Stock history and depletion forecast">
       {threshold != null && (
         <line x1={pad} x2={W - pad} y1={y(threshold)} y2={y(threshold)} stroke="var(--color-crit)" strokeWidth="1.5" strokeDasharray="2 5" opacity="0.7" />
       )}
       <path d={d} fill="none" stroke="var(--color-accent)" strokeWidth="2" strokeLinejoin="round" />
-      <circle cx={x(series.length - 1)} cy={y(series[series.length - 1])} r="4" fill="var(--color-accent)" />
+      {forecast && (
+        <>
+          <line x1={x(now)} y1={y(last.v)} x2={x(tEnd)} y2={y(0)} stroke="var(--color-accent)" strokeWidth="1.8" strokeDasharray="4 4" opacity="0.65" />
+          <text x={Math.min(x(tEnd), W - pad) - 2} y={y(0) - 4} textAnchor="end" fontSize="8.5" fill="var(--color-mut)" fontFamily="var(--font-mono)">
+            {fmtD(tEnd)}
+          </text>
+          {orderBy != null && orderBy > t0 && (
+            <>
+              <line x1={x(orderBy)} x2={x(orderBy)} y1={pad} y2={H - padB} stroke="var(--color-warn)" strokeWidth="1.5" strokeDasharray="3 3" />
+              <text x={x(orderBy)} y={H - 4} textAnchor="middle" fontSize="8.5" fontWeight="700" fill="var(--color-warn)" fontFamily="var(--font-mono)">
+                order by {fmtD(orderBy)}
+              </text>
+            </>
+          )}
+        </>
+      )}
+      <circle cx={x(now)} cy={y(last.v)} r="4" fill="var(--color-accent)" />
+      <text x={pad} y={H - 4} fontSize="8.5" fill="var(--color-mut)" fontFamily="var(--font-mono)">{fmtD(t0)}</text>
     </svg>
   );
 }

@@ -9,7 +9,7 @@ import { MaterialPickerDialog } from "./MaterialPickerDialog";
  * Lives on the Inventory dashboard where "Needs purchasing" was. Receiving
  * writes the PURCHASE ledger entry and updates the cost basis. */
 
-type PanelNeed = { material: Material; suggestedQty: number; estCostMinor: number; purchaseId: number | null };
+type PanelNeed = { material: Material; suggestedQty: number; estCostMinor: number; purchaseId: number | null; daysLeft: number | null };
 type PanelOnOrder = { id: number; material: Material; quantity: number; estCostMinor: number | null; orderedAt: string | null };
 type Panel = { needs: PanelNeed[]; onOrder: PanelOnOrder[] };
 
@@ -126,7 +126,9 @@ export function PurchasingPanel({ allMaterials, onOpenDetail }: { allMaterials: 
                     </span>
                   )}
                   <span className="font-mono text-[11px] text-ink2">
-                    {formatQty(m.stock.available)} {m.unit} left{m.lowStockThreshold != null && <span className="text-mut"> · thr {formatQty(m.lowStockThreshold)}</span>}
+                    {formatQty(m.stock.available)} {m.unit} left
+                    {n.daysLeft != null && <b className={n.daysLeft <= 10 ? "text-crit" : "text-warn"}> · ~{Math.round(n.daysLeft)} d</b>}
+                    {m.lowStockThreshold != null && <span className="text-mut"> · thr {formatQty(m.lowStockThreshold)}</span>}
                   </span>
                   <span className="ml-auto flex items-center gap-2">
                     <span className="flex items-center gap-1 font-mono text-xs">

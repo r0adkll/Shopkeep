@@ -523,6 +523,18 @@ export function MaterialForm({
               value={m.reorderQuantity == null ? "" : String(m.reorderQuantity)}
               onChange={(v) => set({ reorderQuantity: num(v) })}
             />
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">
+                Lead time (days) <span className="font-normal normal-case">order-by date = run-out − this</span>
+              </span>
+              <input
+                value={m.attributes.leadTimeDays ?? ""}
+                onChange={(e) => setAttr("leadTimeDays", e.target.value)}
+                placeholder="7"
+                inputMode="numeric"
+                className="w-full rounded-md border border-line bg-panel2 px-3 py-2 text-ink outline-none focus:border-accent"
+              />
+            </label>
             {!existing && <Field label="Starting stock" value={initialQty} onChange={setInitialQty} />}
             <div className={existing ? "col-span-2" : ""}>
               <Field label="Vendor URL" value={m.vendorUrl ?? ""} onChange={(v) => set({ vendorUrl: v || null })} />

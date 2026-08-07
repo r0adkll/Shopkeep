@@ -25,8 +25,35 @@ data class CreateMaterialRequest(
 @Serializable
 data class TransactionRequest(val delta: Double, val kind: TxnKind, val note: String? = null)
 
+/** Depletion forecast (Inventory UX, locked): trend-based run-out plus the
+ *  chart's actionable payload — order-by = run-out minus vendor lead time
+ *  (attributes.leadTimeDays, default 7). Null when usage is too quiet. */
 @Serializable
-data class MaterialDetail(val material: Material, val ledger: List<LedgerEntry>)
+data class Forecast(
+    val ratePerDay: Double,
+    val daysLeft: Double,
+    val runOutDate: String,
+    val orderByDate: String,
+    val leadTimeDays: Int,
+)
+
+@Serializable
+data class MaterialDetail(val material: Material, val ledger: List<LedgerEntry>, val forecast: Forecast? = null)
+
+fun forecastFor(m: Material, ratePerDay: Double): Forecast? {
+    if (ratePerDay < 0.0001 || m.stock.available <= 0) return null
+    val daysLeft = m.stock.available / ratePerDay
+    if (daysLeft > 365) return null
+    val leadTime = m.attributes["leadTimeDays"]?.toIntOrNull()?.coerceIn(0, 90) ?: 7
+    val runOut = java.time.LocalDate.now().plusDays(daysLeft.toLong())
+    return Forecast(
+        ratePerDay = ratePerDay,
+        daysLeft = daysLeft,
+        runOutDate = runOut.toString(),
+        orderByDate = runOut.minusDays(leadTime.toLong()).toString(),
+        leadTimeDays = leadTime,
+    )
+}
 
 @Serializable
 data class ArchiveRequest(val archived: Boolean)
@@ -75,7 +102,8 @@ fun Route.inventoryRoutes(materials: MaterialRepository) {
             if (material == null) {
                 call.respond(HttpStatusCode.NotFound, ApiError("Material not found."))
             } else {
-                call.respond(MaterialDetail(material, materials.ledger(id)))
+                val rate = materials.consumptionRates(listOf(id))[id] ?: 0.0
+                call.respond(MaterialDetail(material, materials.ledger(id), forecastFor(material, rate)))
             }
         }
 
@@ -123,7 +151,9 @@ fun Route.inventoryRoutes(materials: MaterialRepository) {
             }
             val userId = call.principal<UserSession>()!!.userId
             materials.recordTransaction(id, req.delta, req.kind, req.note, userId)
-            call.respond(MaterialDetail(materials.get(id)!!, materials.ledger(id)))
+            val updated = materials.get(id)!!
+            val rate = materials.consumptionRates(listOf(id))[id] ?: 0.0
+            call.respond(MaterialDetail(updated, materials.ledger(id), forecastFor(updated, rate)))
         }
 
         // Weigh-in audit (vault: Inventory UX): gross − tare = what's really
@@ -166,7 +196,9 @@ fun Route.inventoryRoutes(materials: MaterialRepository) {
             if (req.saveTare) materials.setAttribute(id, "spoolWeightGrams", g(req.tareGrams))
             // archiving only makes sense when this was the LAST spool
             if (req.markEmpty && sealed <= 0) materials.setArchived(id, true)
-            call.respond(MaterialDetail(materials.get(id)!!, materials.ledger(id)))
+            val updated = materials.get(id)!!
+            val rate = materials.consumptionRates(listOf(id))[id] ?: 0.0
+            call.respond(MaterialDetail(updated, materials.ledger(id), forecastFor(updated, rate)))
         }
 
         // Needs-purchasing: below-threshold materials, most urgent first
