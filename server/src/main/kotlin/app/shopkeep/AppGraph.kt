@@ -45,6 +45,7 @@ interface AppGraph {
     val pushService: PushService
     val vendorPrefillService: app.shopkeep.inventory.VendorPrefillService
     val filamentCatalog: app.shopkeep.inventory.FilamentCatalogRepository
+    val purchaseRepository: app.shopkeep.inventory.PurchaseRepository
     val packingSlipService: app.shopkeep.fulfillment.PackingSlipService
     val statsService: app.shopkeep.integrations.StatsService
 

@@ -18,6 +18,7 @@ import app.shopkeep.listings.listingRoutes
 import app.shopkeep.inventory.inventoryRoutes
 import app.shopkeep.inventory.vendorPrefillRoutes
 import app.shopkeep.inventory.filamentCatalogRoutes
+import app.shopkeep.inventory.purchasingRoutes
 import app.shopkeep.fulfillment.packingSlipRoutes
 import app.shopkeep.config.AppConfig
 import app.shopkeep.db.connectExposed
@@ -134,6 +135,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             inventoryRoutes(graph.materialRepository)
             vendorPrefillRoutes(graph.vendorPrefillService)
             filamentCatalogRoutes(graph.filamentCatalog)
+            purchasingRoutes(graph.purchaseRepository)
             packingSlipRoutes(graph.packingSlipService)
             catalogRoutes(graph.productRepository)
             documentRoutes(graph.documentRepository)

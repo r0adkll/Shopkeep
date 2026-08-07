@@ -16,6 +16,7 @@ import { MaterialIcon } from "../inventory/MaterialIcon";
 import { MaterialForm } from "../inventory/MaterialForm";
 import { MaterialDetailDrawer } from "../inventory/MaterialDetail";
 import { WeighInSheet, driftBand } from "../inventory/WeighInSheet";
+import { PurchasingPanel } from "../inventory/PurchasingPanel";
 import { Scale } from "lucide-react";
 
 /** Inventory dashboard — first pass of the locked Inventory UX concept:
@@ -84,10 +85,6 @@ export function DashboardPage() {
     [all, query, catFilter, attentionOnly, sort],
   );
   const visibleCategories = categories.filter((c) => visible.some((m) => m.category === c));
-
-  const purchasing = visible
-    .filter((m) => m.status !== "OK" && m.lowStockThreshold != null)
-    .sort((a, b) => a.stock.available / (a.lowStockThreshold || 1) - b.stock.available / (b.lowStockThreshold || 1));
 
   if (!me.data) {
     return <main className="flex min-h-screen items-center justify-center text-mut">Loading…</main>;
@@ -277,47 +274,7 @@ export function DashboardPage() {
         </section>
       ))}
 
-      {/* Needs purchasing, most urgent first */}
-      {purchasing.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-1 text-[13px] font-bold tracking-widest uppercase text-ink2">Needs purchasing</h2>
-          <div className="divide-y divide-line rounded-xl border border-line bg-panel shadow-sm">
-            {purchasing.map((m) => (
-              <div key={m.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-                <span
-                  className={`h-2 w-2 rounded-sm ${m.status === "CRITICAL" ? "bg-crit" : "bg-warn"}`}
-                  aria-hidden="true"
-                />
-                <MaterialIcon category={m.category} type={m.type} size={14} className="text-mut" />
-                <button type="button" onClick={() => setDetailId(m.id)} className="font-medium hover:underline">
-                  {m.name}
-                </button>
-                {m.brand && <span className="text-[10.5px] text-mut">{m.brand}</span>}
-                <span className="text-xs text-mut">
-                  {formatQty(m.stock.available)} {m.unit} left · threshold {formatQty(m.lowStockThreshold ?? 0)}
-                </span>
-                <span
-                  className={`text-[10.5px] font-bold tracking-wider ${m.status === "CRITICAL" ? "text-crit" : "text-warn"}`}
-                >
-                  {m.status === "CRITICAL" ? "CRITICAL" : "LOW"}
-                </span>
-                <span className="ml-auto flex items-center gap-3 text-sm">
-                  {m.reorderQuantity != null && (
-                    <span className="font-mono text-xs text-ink2">
-                      reorder {formatQty(m.reorderQuantity)} {m.unit}
-                    </span>
-                  )}
-                  {m.vendorUrl && (
-                    <a href={m.vendorUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-                      Buy ↗
-                    </a>
-                  )}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      <PurchasingPanel allMaterials={all} onOpenDetail={setDetailId} />
 
       {weighFor && (
         <WeighInSheet
