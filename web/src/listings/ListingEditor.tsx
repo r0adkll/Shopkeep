@@ -3,7 +3,8 @@ import { ExternalLink, ImageDown, Plus, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PushReview } from "./PushReview";
 import { formatQty, inventoryApi, materialColor, type Material } from "../inventory/api";
-import { MaterialPicker } from "../inventory/MaterialPicker";
+import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
+import { MaterialIcon } from "../inventory/MaterialIcon";
 import { catalogApi, documentUrl, skuCodes, uploadImage, type Product, type ServerConfiguration } from "../catalog/api";
 import { ProductImage } from "../catalog/ProductImage";
 import { Button, ErrorText, Field } from "../ui";
@@ -1239,38 +1240,74 @@ function ExtrasEditor({
   materials: Material[];
   onChange: (e: Extra[]) => void;
 }) {
+  // -1 = adding a new extra; >= 0 = swapping the material on that row
+  const [picking, setPicking] = useState<number | null>(null);
   return (
     <div className="rounded-xl border border-line bg-panel p-4 shadow-sm">
-      {extras.map((e, i) => (
-        <div key={i} className="mb-2 flex flex-wrap items-center gap-2 text-sm">
-          <MaterialPicker
-            all={materials}
-            value={materials.find((m) => m.id === e.materialId) ?? null}
-            onChange={(id) => onChange(extras.map((x, j) => (j === i ? { ...x, materialId: id } : x)))}
-          />
-          <input
-            value={String(e.quantity || "")}
-            onChange={(ev) => onChange(extras.map((x, j) => (j === i ? { ...x, quantity: parseFloat(ev.target.value) || 0 } : x)))}
-            className="w-16 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
-          />
-          <select
-            value={e.basis}
-            onChange={(ev) => onChange(extras.map((x, j) => (j === i ? { ...x, basis: ev.target.value as Extra["basis"] } : x)))}
-            className="rounded border border-line bg-panel2 px-1.5 py-1 text-xs"
-          >
-            <option value="per_order">per order</option>
-            <option value="per_unit">per unit</option>
-          </select>
-          <button type="button" onClick={() => onChange(extras.filter((_, j) => j !== i))} className="text-xs text-mut hover:text-crit">remove</button>
-        </div>
-      ))}
+      {extras.map((e, i) => {
+        const m = materials.find((x) => x.id === e.materialId);
+        const color = m ? materialColor(m) : null;
+        return (
+          <div key={i} className="mb-2 flex flex-wrap items-center gap-2.5 rounded-lg border border-line bg-panel2/50 px-3 py-2 text-sm">
+            <span
+              className="flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-line"
+              style={{ background: color ? `color-mix(in srgb, ${color} 16%, transparent)` : "var(--color-panel2)" }}
+            >
+              <MaterialIcon category={m?.category ?? ""} type={m?.type} size={15} style={{ color: color ?? "var(--color-ink2)" }} />
+            </span>
+            <span className="min-w-0">
+              <b className="block text-[13px] leading-tight">
+                {m?.name ?? "pick a material"}
+                {m?.brand && <span className="ml-1.5 text-[10.5px] font-normal text-mut">{m.brand}</span>}
+              </b>
+              {m && <span className="text-[10.5px] text-mut">{m.type} · {m.category}</span>}
+            </span>
+            <span className="ml-auto flex items-center gap-2">
+              <input
+                value={String(e.quantity || "")}
+                onChange={(ev) => onChange(extras.map((x, j) => (j === i ? { ...x, quantity: parseFloat(ev.target.value) || 0 } : x)))}
+                className="w-16 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
+              />
+              <span className="text-[10.5px] text-mut">{m?.unit ?? ""}</span>
+              <select
+                value={e.basis}
+                onChange={(ev) => onChange(extras.map((x, j) => (j === i ? { ...x, basis: ev.target.value as Extra["basis"] } : x)))}
+                className="rounded border border-line bg-panel2 px-1.5 py-1 text-xs"
+              >
+                <option value="per_order">per order</option>
+                <option value="per_unit">per unit</option>
+              </select>
+              <button type="button" onClick={() => setPicking(i)}
+                className="rounded-md border border-line px-2.5 py-1 text-xs font-semibold text-ink2 hover:border-accent hover:text-accent">
+                change
+              </button>
+              <button type="button" onClick={() => onChange(extras.filter((_, j) => j !== i))} className="text-xs text-mut hover:text-crit">remove</button>
+            </span>
+          </div>
+        );
+      })}
       <button
         type="button"
-        onClick={() => materials.length && onChange([...extras, { materialId: 0, quantity: 1, basis: "per_order" }])}
+        onClick={() => setPicking(-1)}
         className="w-full rounded-lg border border-dashed border-line py-1.5 text-xs text-accent hover:border-accent"
       >
         + Add extra
       </button>
+      {picking != null && (
+        <MaterialPickerDialog
+          all={materials}
+          title={picking === -1 ? "Add a per-order extra" : "Swap the extra's material"}
+          onPick={(id) => {
+            onChange(
+              picking === -1
+                ? [...extras, { materialId: id, quantity: 1, basis: "per_order" }]
+                : extras.map((x, j) => (j === picking ? { ...x, materialId: id } : x)),
+            );
+            setPicking(null);
+          }}
+          onClose={() => setPicking(null)}
+        />
+      )}
     </div>
   );
 }
