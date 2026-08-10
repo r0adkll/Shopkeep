@@ -23,7 +23,7 @@ type StatsResponse = {
   cycleAvgHours: number;
   cycleMedianHours: number;
   backlog: { name: string; count: number }[];
-  deadStock: { name: string; colorHex: string | null; idleDays: number; available: number; unit: string; worthMinor: number }[];
+  deadStock: { materialId: number; name: string; colorHex: string | null; idleDays: number; available: number; unit: string; worthMinor: number }[];
 };
 
 const $ = (minor: number) => "$" + Math.round(minor / 100).toLocaleString();
@@ -211,12 +211,13 @@ export function StatsPage() {
           <Card>
             {s.deadStock.length === 0 && <p className="py-2 text-center text-sm text-mut">Nothing idle — every material moved in the last 45 days.</p>}
             {s.deadStock.map((m) => (
-              <div key={m.name} className="flex items-center gap-2.5 border-b border-line py-1.5 text-[12.5px] last:border-b-0">
+              <a key={m.materialId} href={`/?material=${m.materialId}`}
+                className="flex items-center gap-2.5 border-b border-line py-1.5 text-[12.5px] last:border-b-0 hover:bg-accent/5">
                 <span className="h-3.5 w-3.5 flex-none rounded border border-line" style={{ background: m.colorHex ?? "var(--color-panel2)" }} />
-                <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                <span className="min-w-0 flex-1 truncate hover:underline">{m.name}</span>
                 <span className="font-mono text-xs text-warn">{m.idleDays} d idle</span>
                 <span className="font-mono text-xs text-mut">{Math.round(m.available)} {m.unit} · ~{$(m.worthMinor)} sitting</span>
-              </div>
+              </a>
             ))}
             {s.deadStock.length > 0 && <p className="mt-2 text-[11px] text-mut">candidates for a sale colorway — or a listing that features them</p>}
           </Card>

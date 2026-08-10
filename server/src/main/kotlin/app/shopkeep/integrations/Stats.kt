@@ -52,7 +52,7 @@ data class StatLane(val name: String, val avgHours: Double, val samplesHours: Li
 data class StatBacklog(val name: String, val count: Int)
 
 @Serializable
-data class StatDeadStock(val name: String, val colorHex: String?, val idleDays: Long, val available: Double, val unit: String, val worthMinor: Long)
+data class StatDeadStock(val materialId: Long, val name: String, val colorHex: String?, val idleDays: Long, val available: Double, val unit: String, val worthMinor: Long)
 
 @Serializable
 data class StatWeekSpend(val weekStart: String, val spendMinor: Long)
@@ -266,6 +266,7 @@ class StatsService(
                 if (idle < 45) return@mapNotNull null
                 val unitCost = matInfo[id]?.first ?: 0.0
                 StatDeadStock(
+                    materialId = id,
                     name = m[MaterialsTable.name], colorHex = m[MaterialsTable.attributes]["color"],
                     idleDays = idle, available = onHand, unit = m[MaterialsTable.unit],
                     worthMinor = (unitCost * onHand).toLong(),
