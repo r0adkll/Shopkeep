@@ -565,14 +565,18 @@ function OrderDetailPanel(props: {
                       </div>
                     )}
                     {l.personalization.length > 0 && (
-                      <div className="mt-1.5 rounded-lg border border-accent bg-accent/5 px-2.5 py-1.5">
+                      <div className="mt-1.5 rounded-lg border border-accent/40 bg-accent/5 px-2.5 py-1.5">
                         <div className="text-[9px] font-extrabold tracking-widest text-accent uppercase">✎ Personalization</div>
-                        {l.personalization.map((p, i) => (
-                          <div key={i} className="flex items-baseline gap-3 py-0.5 text-xs">
-                            <span className="min-w-0 flex-1 text-ink2">{p.formatted_name}</span>
-                            <span className="font-mono font-bold break-all">{p.formatted_value}</span>
-                          </div>
-                        ))}
+                        {/* question over answer — free-text values run long and
+                            must never share a line with the question */}
+                        <div className="divide-y divide-accent/10">
+                          {l.personalization.map((p, i) => (
+                            <div key={i} className="py-1">
+                              <div className="text-[10.5px] leading-tight text-mut">{p.formatted_name}</div>
+                              <div className="font-mono text-[12.5px] leading-snug font-semibold break-words whitespace-pre-wrap">{p.formatted_value}</div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                     <div className="mt-1.5 flex items-center gap-2 border-t border-dotted border-line/60 pt-1 text-[11px]">
@@ -1077,13 +1081,16 @@ function OrderCard(props: {
 
       {(pers.length > 0 || o.flagShort || o.flagAdhoc || anyUnmatched || anyReview) && (
         <div className="mt-1.5 flex flex-wrap gap-1">
+          {/* chip = presence + a peek; the full text lives on the detail.
+              Buyer free text: tinted (not solid), truncated, normal casing. */}
           {pers.map((p, i) => (
             <span
               key={i}
-              title={p.formatted_name}
-              className="rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-extrabold tracking-wider text-white"
+              title={`${p.formatted_name}: ${p.formatted_value}`}
+              className="inline-flex max-w-44 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent"
             >
-              ✎ {p.formatted_value}
+              <span aria-hidden="true">✎</span>
+              <span className="min-w-0 truncate font-mono">{p.formatted_value}</span>
             </span>
           ))}
           {o.archived && (
