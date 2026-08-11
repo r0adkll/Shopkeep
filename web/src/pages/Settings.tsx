@@ -124,17 +124,19 @@ export function SettingsPage() {
               {c.status}
             </span>
             {isAdmin && (
+              // pending state is per-card: the mutations are page-level, so
+              // gate on .variables or every connection's buttons light up
               <span className="ml-auto flex gap-2">
-                <button type="button" onClick={() => syncNow.mutate(c.id)} disabled={syncNow.isPending}
+                <button type="button" onClick={() => syncNow.mutate(c.id)} disabled={syncNow.isPending && syncNow.variables === c.id}
                   className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">
-                  {syncNow.isPending ? "Syncing…" : "Sync now"}
+                  {syncNow.isPending && syncNow.variables === c.id ? "Syncing…" : "Sync now"}
                 </button>
-                <button type="button" onClick={() => verify.mutate(c.id)} disabled={verify.isPending}
+                <button type="button" onClick={() => verify.mutate(c.id)} disabled={verify.isPending && verify.variables === c.id}
                   className="rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink2 hover:border-accent hover:text-ink">
-                  {verify.isPending ? "Verifying…" : "Verify"}
+                  {verify.isPending && verify.variables === c.id ? "Verifying…" : "Verify"}
                 </button>
-                <button type="button" onClick={() => disconnect.mutate(c.id)}
-                  className="rounded-md border border-crit/40 px-3 py-1.5 text-xs font-semibold text-crit hover:border-crit">
+                <button type="button" onClick={() => disconnect.mutate(c.id)} disabled={disconnect.isPending && disconnect.variables === c.id}
+                  className="rounded-md border border-crit/40 px-3 py-1.5 text-xs font-semibold text-crit hover:border-crit disabled:opacity-50">
                   Disconnect
                 </button>
               </span>
