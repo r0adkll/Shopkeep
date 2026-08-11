@@ -70,6 +70,7 @@ type OrderDetail = {
   shipments: { source: string; carrierName: string | null; trackingCode: string | null; labelCostMinor: number | null; at: string | null; labelDocumentId: number | null }[];
   shipPackage: { boxName: string | null; weightGrams: number | null } | null;
   uspsLabelEnabled: boolean;
+  uspsLabelTest: boolean;
   shipName: string | null;
   shipLine1: string | null;
   shipLine2: string | null;
@@ -373,7 +374,7 @@ function OrderDetailPanel(props: {
     mutationFn: async () => {
       const r = await fetch(`/api/v1/orders/${orderId}/usps-label`, { method: "POST" });
       if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { message?: string } | null)?.message ?? r.statusText);
-      return (await r.json()) as { trackingCode: string; labelCostMinor: number | null; labelDocumentId: number | null; etsyReported: boolean; error: string | null };
+      return (await r.json()) as { trackingCode: string; labelCostMinor: number | null; labelDocumentId: number | null; etsyReported: boolean; error: string | null; test: boolean };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["order", orderId] });
@@ -813,7 +814,9 @@ function OrderDetailPanel(props: {
                   <div className="mt-1.5">
                     {buyLabel.data ? (
                       <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span className="rounded-full bg-good/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-good">LABEL BOUGHT</span>
+                        {buyLabel.data.test
+                          ? <span className="rounded-full bg-warn/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-warn">TEST LABEL</span>
+                          : <span className="rounded-full bg-good/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-good">LABEL BOUGHT</span>}
                         <span className="font-mono">{buyLabel.data.trackingCode}</span>
                         {buyLabel.data.labelCostMinor != null && <span className="font-mono text-ink2">{money(buyLabel.data.labelCostMinor)}</span>}
                         {buyLabel.data.labelDocumentId != null && (
@@ -822,9 +825,11 @@ function OrderDetailPanel(props: {
                             🖨 Print label
                           </button>
                         )}
-                        {buyLabel.data.etsyReported
-                          ? <span className="text-[11px] text-good">✓ tracking reported to Etsy</span>
-                          : <span className="text-[11px] font-medium text-warn">{buyLabel.data.error}</span>}
+                        {buyLabel.data.test
+                          ? <span className="text-[11px] text-mut">sandbox — nothing recorded, Etsy untouched</span>
+                          : buyLabel.data.etsyReported
+                            ? <span className="text-[11px] text-good">✓ tracking reported to Etsy</span>
+                            : <span className="text-[11px] font-medium text-warn">{buyLabel.data.error}</span>}
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center gap-2">
@@ -834,9 +839,9 @@ function OrderDetailPanel(props: {
                           title={d.shipPackage?.weightGrams == null ? "package weight unknown — set ship weights first" : "charges your EPS account"}
                           className="rounded-md bg-accent px-3 py-1.5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50"
                         >
-                          {buyLabel.isPending ? "Buying…" : `Buy USPS label${d.shipEstimateSource === "usps" && d.shipEstimateMinor != null ? ` · ~${money(d.shipEstimateMinor)}` : ""}`}
+                          {buyLabel.isPending ? "Buying…" : `Buy ${d.uspsLabelTest ? "TEST " : ""}USPS label${d.shipEstimateSource === "usps" && d.shipEstimateMinor != null ? ` · ~${money(d.shipEstimateMinor)}` : ""}`}
                         </button>
-                        <span className="text-[11px] text-mut">charges your EPS account · reports tracking to Etsy</span>
+                        <span className="text-[11px] text-mut">{d.uspsLabelTest ? "TEM sandbox — fake label, nothing recorded" : "charges your EPS account · reports tracking to Etsy"}</span>
                       </div>
                     )}
                     {buyLabel.isError && <p className="mt-1 text-xs font-medium text-crit">{(buyLabel.error as Error).message}</p>}

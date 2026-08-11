@@ -258,6 +258,7 @@ data class OrderDetail(
     val shipments: List<ShipmentView> = emptyList(),
     val shipPackage: ShipPackageInfo? = null, // box + computed weight for the Ship sheet
     val uspsLabelEnabled: Boolean = false, // Path B: connection toggle + label config complete
+    val uspsLabelTest: Boolean = false, // TEM sandbox — buys are fake, nothing recorded
     val shipName: String?,
     val shipLine1: String?,
     val shipLine2: String?,
@@ -1159,6 +1160,7 @@ class SyncService(
         val labelCostMinor: Long? = null,
         val labelDocumentId: Long? = null,
         val etsyReported: Boolean = false,
+        val test: Boolean = false,
     )
 
     /** Path B (locked ship concept): buy a USPS label for the order, store
@@ -1194,8 +1196,18 @@ class SyncService(
             return BuyLabelResult(false, e.message ?: "USPS label purchase failed.")
         }
         val docId = connections.documentsSaver?.invoke(
-            "usps-label", "application/pdf", "usps-label-${o[OrdersTable.platformOrderId]}.pdf", bought.labelPdf,
+            if (bought.test) "usps-label-test" else "usps-label", "application/pdf",
+            "usps-label-${o[OrdersTable.platformOrderId]}${if (bought.test) "-TEST" else ""}.pdf", bought.labelPdf,
         )
+        // TEM sandbox: prove the flow end-to-end, but record nothing on the
+        // real order and never touch Etsy — the label is not postage.
+        if (bought.test) {
+            return BuyLabelResult(
+                ok = true, trackingCode = bought.trackingNumber,
+                labelCostMinor = bought.postageMinor, labelDocumentId = docId,
+                etsyReported = false, test = true,
+            )
+        }
         dbQuery {
             ShipmentsTable.insert {
                 it[ShipmentsTable.orderId] = orderId
@@ -1459,13 +1471,15 @@ class SyncService(
         val uspsLabelEnabled = dbQuery {
             ConnectionsTable.selectAll().where { ConnectionsTable.platform eq "usps" }
                 .andWhere { ConnectionsTable.status eq "connected" }.firstOrNull()
-        }?.get(ConnectionsTable.config)?.let { cfg ->
+        }?.get(ConnectionsTable.config)
+        val uspsEnabled = uspsLabelEnabled?.let { cfg ->
             cfg["labelPurchase"] == "true" && connections.uspsLabelConfigured(cfg) == null
         } ?: false
 
         return OrderDetail(
             order = summary,
-            uspsLabelEnabled = uspsLabelEnabled,
+            uspsLabelEnabled = uspsEnabled,
+            uspsLabelTest = uspsLabelEnabled?.get("environment") == "test",
             shipFeesMinor = shipFees,
             shipEstimateMinor = shipEstimate,
             shipEstimateSource = shipEstimateSource,

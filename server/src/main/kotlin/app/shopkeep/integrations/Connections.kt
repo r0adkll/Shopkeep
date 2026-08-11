@@ -829,14 +829,20 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             ?.get(ConnectionsTable.config) ?: emptyMap()
         // merge, dropping blanked-out keys — label setup arrives incrementally
         val next = (current + patch).filterValues { it.isNotBlank() }
-        ConnectionsTable.update({ ConnectionsTable.id eq id }) { it[config] = next } > 0
+        // env may have flipped (prod <-> TEM): cached tokens are host-bound
+        uspsPaymentTokenCache = null
+        ConnectionsTable.update({ ConnectionsTable.id eq id }) {
+            it[config] = next
+            it[accessTokenEnc] = null
+            it[tokenExpiresAt] = null
+        } > 0
     }
 
 
     /** Verify = OAuth2 client-credentials token fetch against apis.usps.com. */
     private suspend fun verifyUsps(id: Long, row: org.jetbrains.exposed.sql.ResultRow): Connection {
         return try {
-            val token = uspsToken(row[ConnectionsTable.apiKeystring], row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: "")
+            val token = uspsToken(row[ConnectionsTable.apiKeystring], row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: "", uspsBase(row))
             dbQuery {
                 ConnectionsTable.update({ ConnectionsTable.id eq id }) {
                     it[accessTokenEnc] = crypto.encrypt(token.accessToken)
@@ -858,8 +864,13 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         }
     }
 
-    private suspend fun uspsToken(key: String, secret: String): UspsToken {
-        val resp = http.request("https://apis.usps.com/oauth2/v3/token") {
+    /** TEM sandbox switch: config.environment == "test" -> apis-tem host.
+     *  Lets the whole label flow validate before production onboarding. */
+    private fun uspsBase(row: org.jetbrains.exposed.sql.ResultRow) =
+        if (row[ConnectionsTable.config]?.get("environment") == "test") "https://apis-tem.usps.com" else "https://apis.usps.com"
+
+    private suspend fun uspsToken(key: String, secret: String, base: String): UspsToken {
+        val resp = http.request("$base/oauth2/v3/token") {
             method = io.ktor.http.HttpMethod.Post
             contentType(io.ktor.http.ContentType.Application.Json)
             setBody("""{"grant_type":"client_credentials","client_id":"$key","client_secret":"$secret"}""")
@@ -873,7 +884,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         val expiresAt = row[ConnectionsTable.tokenExpiresAt]
         val stored = row[ConnectionsTable.accessTokenEnc]?.let(crypto::decrypt)
         if (stored != null && expiresAt != null && expiresAt.isAfter(OffsetDateTime.now().plusMinutes(2))) return stored
-        val token = uspsToken(row[ConnectionsTable.apiKeystring], row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: "")
+        val token = uspsToken(row[ConnectionsTable.apiKeystring], row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: "", uspsBase(row))
         dbQuery {
             ConnectionsTable.update({ ConnectionsTable.id eq row[ConnectionsTable.id] }) {
                 it[accessTokenEnc] = crypto.encrypt(token.accessToken)
@@ -903,7 +914,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         return runCatching {
             val access = uspsAccess(row)
             val body = """{"originZIPCode":"$originZip","destinationZIPCode":"$zip5","weight":$pounds,"length":$lengthIn,"width":$widthIn,"height":$heightIn,"mailClass":"$mailClass","processingCategory":"MACHINABLE","rateIndicator":"SP","destinationEntryFacilityType":"NONE","priceType":"COMMERCIAL"}"""
-            val resp = http.request("https://apis.usps.com/prices/v3/base-rates/search") {
+            val resp = http.request("${uspsBase(row)}/prices/v3/base-rates/search") {
                 method = io.ktor.http.HttpMethod.Post
                 headers { append(HttpHeaders.Authorization, "Bearer $access") }
                 contentType(io.ktor.http.ContentType.Application.Json)
@@ -922,7 +933,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
     // POST /payments/v3/payment-authorization -> token; the token rides the
     // X-Payment-Authorization-Token header on POST /labels/v3/label.
 
-    data class UspsLabelPurchase(val trackingNumber: String, val postageMinor: Long?, val labelPdf: ByteArray)
+    data class UspsLabelPurchase(val trackingNumber: String, val postageMinor: Long?, val labelPdf: ByteArray, val test: Boolean = false)
 
     private val looseJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
     private var uspsPaymentTokenCache: Pair<String, Long>? = null // token, expiresAtMs
@@ -939,7 +950,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         val access = uspsAccess(row)
         fun role(name: String) =
             """{"roleName":"$name","CRID":"${cfg["crid"]}","MID":"${cfg["mid"]}","manifestMID":"${cfg["manifestMid"].takeUnless { it.isNullOrBlank() } ?: cfg["mid"]}","accountType":"EPS","accountNumber":"${cfg["accountNumber"]}"}"""
-        val resp = http.request("https://apis.usps.com/payments/v3/payment-authorization") {
+        val resp = http.request("${uspsBase(row)}/payments/v3/payment-authorization") {
             method = io.ktor.http.HttpMethod.Post
             headers { append(HttpHeaders.Authorization, "Bearer $access") }
             contentType(io.ktor.http.ContentType.Application.Json)
@@ -965,6 +976,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         } ?: error("No connected USPS connection.")
         val cfg = row[ConnectionsTable.config] ?: error("USPS connection has no config.")
         uspsLabelConfigured(cfg)?.let { error("USPS label setup incomplete — missing '$it' in the connection settings.") }
+        val testEnv = cfg["environment"] == "test"
         val mailClass = cfg["mailClass"]?.takeIf { it.isNotBlank() } ?: "USPS_GROUND_ADVANTAGE"
         val pounds = Math.ceil(weightGrams / 28.3495) / 16.0
         fun j(s: String?) = (s ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
@@ -977,7 +989,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         }"""
         val paymentToken = uspsPaymentToken(row, cfg)
         val access = uspsAccess(row)
-        val resp = http.request("https://apis.usps.com/labels/v3/label") {
+        val resp = http.request("${uspsBase(row)}/labels/v3/label") {
             method = io.ktor.http.HttpMethod.Post
             headers {
                 append(HttpHeaders.Authorization, "Bearer $access")
@@ -998,6 +1010,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
                 labelPdf = java.util.Base64.getDecoder().decode(
                     root["labelImage"]?.jsonPrimitive?.content ?: error("USPS label: no label image"),
                 ),
+                test = testEnv,
             )
         }
         // multipart/mixed: a JSON metadata part + the PDF part
@@ -1013,6 +1026,7 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             trackingNumber = meta["trackingNumber"]?.jsonPrimitive?.content ?: error("USPS label: no tracking number"),
             postageMinor = meta["postage"]?.jsonPrimitive?.content?.toDoubleOrNull()?.let { Math.round(it * 100) },
             labelPdf = pdf,
+            test = testEnv,
         )
     }
 

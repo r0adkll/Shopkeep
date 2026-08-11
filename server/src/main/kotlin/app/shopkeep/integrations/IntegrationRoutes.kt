@@ -48,6 +48,7 @@ data class UspsConfigRequest(
     val fromCity: String = "",
     val fromState: String = "",
     val labelPurchase: Boolean? = null,
+    val environment: String = "production", // production | test (TEM sandbox)
 )
 
 @Serializable
@@ -156,6 +157,7 @@ fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService
                 put("fromName", req.fromName.trim()); put("fromStreet", req.fromStreet.trim())
                 put("fromCity", req.fromCity.trim()); put("fromState", req.fromState.trim().uppercase())
                 req.labelPurchase?.let { put("labelPurchase", it.toString()) }
+                put("environment", if (req.environment == "test") "test" else "")
             }
             if (id == null || !connections.updateUspsConfig(id, patch)) {
                 call.respond(HttpStatusCode.NotFound, ApiError("Connection not found."))

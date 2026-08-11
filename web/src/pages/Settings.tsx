@@ -437,6 +437,7 @@ function UspsConfig({ c }: { c: Connection }) {
     crid: cfg("crid"), mid: cfg("mid"), manifestMid: cfg("manifestMid"), accountNumber: cfg("accountNumber"),
     fromName: cfg("fromName"), fromStreet: cfg("fromStreet"), fromCity: cfg("fromCity"), fromState: cfg("fromState"),
     labelPurchase: cfg("labelPurchase") === "true",
+    environment: cfg("environment") === "test" ? "test" : "production",
   });
   const set = (k: string, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
   const save = useMutation({
@@ -461,7 +462,16 @@ function UspsConfig({ c }: { c: Connection }) {
           <input type="checkbox" checked={f.labelPurchase} disabled={!labelReady} onChange={(e) => set("labelPurchase", e.target.checked)} className="accent-accent" />
           Label purchase
         </label>
-        <span className="text-[10.5px] text-mut">buying charges your EPS account — needs USPS Ship-API enrollment (CRID + MID + payment account)</span>
+        <select value={f.environment} onChange={(e) => set("environment", e.target.value)}
+          className={`rounded border px-1.5 py-0.5 text-xs ${f.environment === "test" ? "border-warn bg-warn/10 font-semibold text-warn" : "border-line bg-panel2"}`}>
+          <option value="production">production</option>
+          <option value="test">TEM sandbox</option>
+        </select>
+        <span className="text-[10.5px] text-mut">
+          {f.environment === "test"
+            ? "sandbox (apis-tem) — buys are fake, nothing is recorded or sent to Etsy; use your TEM app credentials"
+            : "buying charges your EPS account — needs USPS Ship-API enrollment (CRID + MID + payment account)"}
+        </span>
       </span>
       <span className="flex flex-wrap items-center gap-2 text-[11px]">
         CRID <input value={f.crid} onChange={(e) => set("crid", e.target.value)} className={`w-20 ${inp}`} />
