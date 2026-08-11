@@ -1454,8 +1454,9 @@ class SyncService(
         // The order's reserved BOM straight from the ledger, priced with
         // material costs. Active orders NET reservations against releases so
         // re-resolves/re-matches show only what's still held; completed
-        // orders keep showing what was consumed (their reservations were
-        // converted to release+consumption pairs at completion).
+        // orders read CONSUMPTION rows — reading reservation rows there
+        // multiplied the view by re-resolve generation count, and the
+        // conversion/repair keep consumption as the single source of truth.
         var matsCost = 0.0
         val mats = dbQuery {
             app.shopkeep.inventory.InventoryTransactionsTable
@@ -1467,7 +1468,7 @@ class SyncService(
                 )
                 .selectAll()
                 .where {
-                    if (completed) app.shopkeep.inventory.InventoryTransactionsTable.kind eq "reservation"
+                    if (completed) app.shopkeep.inventory.InventoryTransactionsTable.kind eq "consumption"
                     else app.shopkeep.inventory.InventoryTransactionsTable.kind inList listOf("reservation", "release")
                 }
                 .andWhere { app.shopkeep.inventory.InventoryTransactionsTable.note like "$notePrefix%" }
