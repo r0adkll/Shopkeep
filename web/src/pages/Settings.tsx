@@ -431,28 +431,56 @@ const MAIL_CLASSES = [
 /** Origin ZIP + mail class live on the connection (D22). */
 function UspsConfig({ c }: { c: Connection }) {
   const queryClient = useQueryClient();
-  const [zip, setZip] = useState(c.config?.originZip ?? "");
-  const [mailClass, setMailClass] = useState(c.config?.mailClass ?? "USPS_GROUND_ADVANTAGE");
-  const dirty = zip !== (c.config?.originZip ?? "") || mailClass !== (c.config?.mailClass ?? "USPS_GROUND_ADVANTAGE");
+  const cfg = (k: string) => c.config?.[k] ?? "";
+  const [f, setF] = useState({
+    originZip: cfg("originZip"), mailClass: cfg("mailClass") || "USPS_GROUND_ADVANTAGE",
+    crid: cfg("crid"), mid: cfg("mid"), manifestMid: cfg("manifestMid"), accountNumber: cfg("accountNumber"),
+    fromName: cfg("fromName"), fromStreet: cfg("fromStreet"), fromCity: cfg("fromCity"), fromState: cfg("fromState"),
+    labelPurchase: cfg("labelPurchase") === "true",
+  });
+  const set = (k: string, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
   const save = useMutation({
-    mutationFn: () => req(`/usps/${c.id}/config`, { method: "PUT", body: JSON.stringify({ originZip: zip, mailClass }) }),
+    mutationFn: () => req(`/usps/${c.id}/config`, { method: "PUT", body: JSON.stringify(f) }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["connections"] }),
   });
+  const labelReady = !!(f.crid && f.mid && f.accountNumber && f.fromName && f.fromStreet && f.fromCity && f.fromState && f.originZip);
+  const inp = "rounded border border-line bg-panel2 px-2 py-0.5 font-mono text-xs";
   return (
-    <span className="flex flex-wrap items-center gap-2">
-      origin ZIP
-      <input value={zip} onChange={(e) => setZip(e.target.value)} className="w-20 rounded border border-line bg-panel2 px-2 py-0.5 font-mono text-xs" />
-      <select value={mailClass} onChange={(e) => setMailClass(e.target.value)} className="rounded border border-line bg-panel2 px-1.5 py-0.5 text-xs">
-        {MAIL_CLASSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-      {dirty && (
+    <div className="flex flex-col gap-1.5">
+      <span className="flex flex-wrap items-center gap-2">
+        origin ZIP
+        <input value={f.originZip} onChange={(e) => set("originZip", e.target.value)} className={`w-20 ${inp}`} />
+        <select value={f.mailClass} onChange={(e) => set("mailClass", e.target.value)} className="rounded border border-line bg-panel2 px-1.5 py-0.5 text-xs">
+          {MAIL_CLASSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <span className="text-mut">quotes use commercial pricing — what Etsy labels charge</span>
+      </span>
+      {/* Path B: label purchase — Ship-API enrollment + EPS payment account */}
+      <span className="flex flex-wrap items-center gap-2">
+        <label className={`flex items-center gap-1.5 text-xs font-semibold ${labelReady ? "text-ink" : "text-mut"}`} title={labelReady ? "" : "fill the Ship-API fields below first"}>
+          <input type="checkbox" checked={f.labelPurchase} disabled={!labelReady} onChange={(e) => set("labelPurchase", e.target.checked)} className="accent-accent" />
+          Label purchase
+        </label>
+        <span className="text-[10.5px] text-mut">buying charges your EPS account — needs USPS Ship-API enrollment (CRID + MID + payment account)</span>
+      </span>
+      <span className="flex flex-wrap items-center gap-2 text-[11px]">
+        CRID <input value={f.crid} onChange={(e) => set("crid", e.target.value)} className={`w-20 ${inp}`} />
+        MID <input value={f.mid} onChange={(e) => set("mid", e.target.value)} className={`w-20 ${inp}`} />
+        manifest MID <input value={f.manifestMid} onChange={(e) => set("manifestMid", e.target.value)} placeholder="= MID" className={`w-20 ${inp}`} />
+        EPS acct <input value={f.accountNumber} onChange={(e) => set("accountNumber", e.target.value)} className={`w-24 ${inp}`} />
+      </span>
+      <span className="flex flex-wrap items-center gap-2 text-[11px]">
+        ship from
+        <input value={f.fromName} onChange={(e) => set("fromName", e.target.value)} placeholder="name" className={`w-28 ${inp}`} />
+        <input value={f.fromStreet} onChange={(e) => set("fromStreet", e.target.value)} placeholder="street" className={`w-40 ${inp}`} />
+        <input value={f.fromCity} onChange={(e) => set("fromCity", e.target.value)} placeholder="city" className={`w-24 ${inp}`} />
+        <input value={f.fromState} onChange={(e) => set("fromState", e.target.value)} placeholder="ST" className={`w-10 ${inp}`} />
         <button type="button" onClick={() => save.mutate()} disabled={save.isPending}
           className="rounded border border-accent/40 px-2 py-0.5 text-[11px] font-semibold text-accent hover:bg-accent/5 disabled:opacity-50">
           {save.isPending ? "Saving…" : "Save"}
         </button>
-      )}
-      <span className="text-mut">quotes use commercial pricing — what Etsy labels charge</span>
-    </span>
+      </span>
+    </div>
   );
 }
 

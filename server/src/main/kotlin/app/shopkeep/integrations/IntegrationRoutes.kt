@@ -35,7 +35,20 @@ data class UspsConnectRequest(
 )
 
 @kotlinx.serialization.Serializable
-data class UspsConfigRequest(val originZip: String, val mailClass: String = "USPS_GROUND_ADVANTAGE")
+data class UspsConfigRequest(
+    val originZip: String,
+    val mailClass: String = "USPS_GROUND_ADVANTAGE",
+    // Path B label purchase — Ship-API enrollment + EPS payment account
+    val crid: String = "",
+    val mid: String = "",
+    val manifestMid: String = "",
+    val accountNumber: String = "",
+    val fromName: String = "",
+    val fromStreet: String = "",
+    val fromCity: String = "",
+    val fromState: String = "",
+    val labelPurchase: Boolean? = null,
+)
 
 @Serializable
 data class StartEtsyResponse(val authUrl: String, val redirectUri: String)
@@ -49,6 +62,19 @@ fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService
 
         // Phase 4 matching tooling: on-demand retro-match sweep + manual match.
         post("/orders/rematch") { call.respond(sync.rematchAll()) }
+
+        // Path B (locked ship concept): buy a USPS label, record the
+        // shipment, report tracking to Etsy. Charges real postage.
+        post("/orders/{id}/usps-label") {
+            val id = call.parameters["id"]?.toLongOrNull()
+            if (id == null) {
+                call.respond(HttpStatusCode.NotFound, ApiError("Order not found."))
+                return@post
+            }
+            val r = sync.buyUspsLabel(id)
+            if (!r.ok) call.respond(HttpStatusCode.UnprocessableEntity, ApiError(r.error ?: "Label purchase failed."))
+            else call.respond(r)
+        }
 
         post("/orders/lines/{id}/reresolve") {
             val r = call.parameters["id"]?.toLongOrNull()?.let { sync.reresolveLine(it) }
@@ -123,7 +149,15 @@ fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService
         put("/integrations/usps/{id}/config") {
             val id = call.parameters["id"]?.toLongOrNull()
             val req = call.receive<UspsConfigRequest>()
-            if (id == null || !connections.updateUspsConfig(id, req.originZip.trim(), req.mailClass)) {
+            val patch = buildMap {
+                put("originZip", req.originZip.trim()); put("mailClass", req.mailClass)
+                put("crid", req.crid.trim()); put("mid", req.mid.trim()); put("manifestMid", req.manifestMid.trim())
+                put("accountNumber", req.accountNumber.trim())
+                put("fromName", req.fromName.trim()); put("fromStreet", req.fromStreet.trim())
+                put("fromCity", req.fromCity.trim()); put("fromState", req.fromState.trim().uppercase())
+                req.labelPurchase?.let { put("labelPurchase", it.toString()) }
+            }
+            if (id == null || !connections.updateUspsConfig(id, patch)) {
                 call.respond(HttpStatusCode.NotFound, ApiError("Connection not found."))
             } else call.respond(mapOf("ok" to true))
         }

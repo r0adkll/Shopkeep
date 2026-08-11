@@ -22,6 +22,8 @@ import io.ktor.http.parameters
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import org.jetbrains.exposed.sql.Table
@@ -822,11 +824,14 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
         return verify(id)
     }
 
-    suspend fun updateUspsConfig(id: Long, originZip: String, mailClass: String): Boolean = dbQuery {
-        ConnectionsTable.update({ ConnectionsTable.id eq id }) {
-            it[config] = mapOf("originZip" to originZip, "mailClass" to mailClass)
-        } > 0
+    suspend fun updateUspsConfig(id: Long, patch: Map<String, String>): Boolean = dbQuery {
+        val current = ConnectionsTable.selectAll().where { ConnectionsTable.id eq id }.singleOrNull()
+            ?.get(ConnectionsTable.config) ?: emptyMap()
+        // merge, dropping blanked-out keys — label setup arrives incrementally
+        val next = (current + patch).filterValues { it.isNotBlank() }
+        ConnectionsTable.update({ ConnectionsTable.id eq id }) { it[config] = next } > 0
     }
+
 
     /** Verify = OAuth2 client-credentials token fetch against apis.usps.com. */
     private suspend fun verifyUsps(id: Long, row: org.jetbrains.exposed.sql.ResultRow): Connection {
@@ -910,6 +915,133 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             uspsQuoteCache[cacheKey] = minor
             minor
         }.getOrNull()
+    }
+
+    /* ---------- USPS label purchase (Path B — D22 extension) ---------- */
+    // Needs Ship-API enrollment: CRID + MID + an Enterprise Payment account.
+    // POST /payments/v3/payment-authorization -> token; the token rides the
+    // X-Payment-Authorization-Token header on POST /labels/v3/label.
+
+    data class UspsLabelPurchase(val trackingNumber: String, val postageMinor: Long?, val labelPdf: ByteArray)
+
+    private val looseJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+    private var uspsPaymentTokenCache: Pair<String, Long>? = null // token, expiresAtMs
+
+    fun uspsLabelConfigured(cfg: Map<String, String>): String? {
+        for (k in listOf("crid", "mid", "accountNumber", "fromName", "fromStreet", "fromCity", "fromState", "originZip")) {
+            if (cfg[k].isNullOrBlank()) return k
+        }
+        return null
+    }
+
+    private suspend fun uspsPaymentToken(row: org.jetbrains.exposed.sql.ResultRow, cfg: Map<String, String>): String {
+        uspsPaymentTokenCache?.let { (tok, exp) -> if (System.currentTimeMillis() < exp) return tok }
+        val access = uspsAccess(row)
+        fun role(name: String) =
+            """{"roleName":"$name","CRID":"${cfg["crid"]}","MID":"${cfg["mid"]}","manifestMID":"${cfg["manifestMid"].takeUnless { it.isNullOrBlank() } ?: cfg["mid"]}","accountType":"EPS","accountNumber":"${cfg["accountNumber"]}"}"""
+        val resp = http.request("https://apis.usps.com/payments/v3/payment-authorization") {
+            method = io.ktor.http.HttpMethod.Post
+            headers { append(HttpHeaders.Authorization, "Bearer $access") }
+            contentType(io.ktor.http.ContentType.Application.Json)
+            setBody("""{"roles":[${role("PAYER")},${role("LABEL_OWNER")}]}""")
+        }
+        if (!resp.status.isSuccess()) error("USPS payment authorization ${resp.status.value}: ${resp.bodyAsText().take(300)}")
+        val token = looseJson.parseToJsonElement(resp.bodyAsText())
+            .jsonObject["paymentAuthorizationToken"]?.jsonPrimitive?.content
+            ?: error("USPS payment authorization: no token in response")
+        uspsPaymentTokenCache = token to (System.currentTimeMillis() + 6 * 3600_000)
+        return token
+    }
+
+    /** Buy a label. Returns tracking + the label PDF, or throws with a
+     *  human-readable message (surfaced verbatim in the ship sheet). */
+    suspend fun uspsBuyLabel(
+        toName: String, toStreet: String, toStreet2: String?, toCity: String, toState: String, toZip: String,
+        weightGrams: Double, lengthIn: Double, widthIn: Double, heightIn: Double,
+    ): UspsLabelPurchase {
+        val row = dbQuery {
+            ConnectionsTable.selectAll().where { ConnectionsTable.platform eq "usps" }
+                .andWhere { ConnectionsTable.status eq "connected" }.firstOrNull()
+        } ?: error("No connected USPS connection.")
+        val cfg = row[ConnectionsTable.config] ?: error("USPS connection has no config.")
+        uspsLabelConfigured(cfg)?.let { error("USPS label setup incomplete — missing '$it' in the connection settings.") }
+        val mailClass = cfg["mailClass"]?.takeIf { it.isNotBlank() } ?: "USPS_GROUND_ADVANTAGE"
+        val pounds = Math.ceil(weightGrams / 28.3495) / 16.0
+        fun j(s: String?) = (s ?: "").replace("\\", "\\\\").replace("\"", "\\\"")
+        val nameParts = toName.trim().split(Regex("\\s+"), 2)
+        val body = """{
+          "imageInfo": {"imageType": "PDF", "labelType": "4X6LABEL", "receiptOption": "NONE"},
+          "fromAddress": {"firstName": "${j(cfg["fromName"])}", "lastName": "", "streetAddress": "${j(cfg["fromStreet"])}", "city": "${j(cfg["fromCity"])}", "state": "${j(cfg["fromState"])}", "ZIPCode": "${j(cfg["originZip"])}"},
+          "toAddress": {"firstName": "${j(nameParts.getOrNull(0))}", "lastName": "${j(nameParts.getOrNull(1))}", "streetAddress": "${j(toStreet)}", "secondaryAddress": "${j(toStreet2)}", "city": "${j(toCity)}", "state": "${j(toState)}", "ZIPCode": "${j(Regex("\\d{5}").find(toZip)?.value ?: toZip)}"},
+          "packageDescription": {"mailClass": "$mailClass", "weight": $pounds, "weightUOM": "lb", "length": $lengthIn, "width": $widthIn, "height": $heightIn, "dimensionsUOM": "in", "processingCategory": "MACHINABLE", "mailingDate": "${java.time.LocalDate.now()}", "destinationEntryFacilityType": "NONE"}
+        }"""
+        val paymentToken = uspsPaymentToken(row, cfg)
+        val access = uspsAccess(row)
+        val resp = http.request("https://apis.usps.com/labels/v3/label") {
+            method = io.ktor.http.HttpMethod.Post
+            headers {
+                append(HttpHeaders.Authorization, "Bearer $access")
+                append("X-Payment-Authorization-Token", paymentToken)
+                append(HttpHeaders.Accept, "application/json")
+            }
+            contentType(io.ktor.http.ContentType.Application.Json)
+            setBody(body)
+        }
+        if (!resp.status.isSuccess()) error("USPS label ${resp.status.value}: ${resp.bodyAsText().take(400)}")
+        val ct = resp.headers[HttpHeaders.ContentType] ?: ""
+        if (ct.contains("json", ignoreCase = true)) {
+            val root = looseJson.parseToJsonElement(resp.bodyAsText()).jsonObject
+            val meta = root["labelMetadata"]?.jsonObject ?: root
+            return UspsLabelPurchase(
+                trackingNumber = meta["trackingNumber"]?.jsonPrimitive?.content ?: error("USPS label: no tracking number"),
+                postageMinor = meta["postage"]?.jsonPrimitive?.content?.toDoubleOrNull()?.let { Math.round(it * 100) },
+                labelPdf = java.util.Base64.getDecoder().decode(
+                    root["labelImage"]?.jsonPrimitive?.content ?: error("USPS label: no label image"),
+                ),
+            )
+        }
+        // multipart/mixed: a JSON metadata part + the PDF part
+        val boundary = Regex("boundary=\"?([^\";]+)").find(ct)?.groupValues?.get(1)
+            ?: error("USPS label: unrecognized response type ($ct)")
+        val parts = splitMultipart(resp.body<ByteArray>(), boundary)
+        val metaText = parts.firstOrNull { it.first.contains("json", true) }?.second?.decodeToString()
+            ?: error("USPS label: no metadata part")
+        val meta = looseJson.parseToJsonElement(metaText).jsonObject.let { it["labelMetadata"]?.jsonObject ?: it }
+        val pdf = parts.firstOrNull { it.first.contains("pdf", true) || it.first.contains("octet", true) }?.second
+            ?: error("USPS label: no PDF part")
+        return UspsLabelPurchase(
+            trackingNumber = meta["trackingNumber"]?.jsonPrimitive?.content ?: error("USPS label: no tracking number"),
+            postageMinor = meta["postage"]?.jsonPrimitive?.content?.toDoubleOrNull()?.let { Math.round(it * 100) },
+            labelPdf = pdf,
+        )
+    }
+
+    private fun splitMultipart(bytes: ByteArray, boundary: String): List<Pair<String, ByteArray>> {
+        val text = bytes.toString(Charsets.ISO_8859_1)
+        return text.split("--$boundary").drop(1).dropLast(1).mapNotNull { part ->
+            val idx = part.indexOf("\r\n\r\n").takeIf { it >= 0 } ?: return@mapNotNull null
+            val headers = part.substring(0, idx)
+            val payload = part.substring(idx + 4).removeSuffix("\r\n")
+            val ctLine = headers.lines().firstOrNull { it.startsWith("Content-Type", true) } ?: ""
+            ctLine to payload.toByteArray(Charsets.ISO_8859_1)
+        }
+    }
+
+    /** Report tracking to Etsy (createReceiptShipment) — flips the receipt to
+     *  shipped; the poll's completion watcher does the rest. Form-encoded. */
+    suspend fun reportEtsyShipment(connectionId: Long, receiptId: String, trackingCode: String, carrier: String): String? {
+        val c = creds(connectionId) ?: return "Etsy connection not available."
+        val resp = http.request("$apiBase/v3/application/shops/${c.shopId}/receipts/$receiptId/tracking") {
+            method = io.ktor.http.HttpMethod.Post
+            headers {
+                append("x-api-key", if (c.secret.isBlank()) c.keystring else "${c.keystring}:${c.secret}")
+                append(HttpHeaders.Authorization, "Bearer ${c.access}")
+            }
+            contentType(io.ktor.http.ContentType.Application.FormUrlEncoded)
+            setBody("tracking_code=${java.net.URLEncoder.encode(trackingCode, "UTF-8")}&carrier_name=${java.net.URLEncoder.encode(carrier, "UTF-8")}")
+        }
+        return if (resp.status.isSuccess()) null
+        else "Etsy tracking report ${resp.status.value}: ${resp.bodyAsText().take(300)}"
     }
 
     private fun org.jetbrains.exposed.sql.ResultRow.toConnection(): Connection = Connection(

@@ -130,6 +130,7 @@ object ShipmentsTable : Table("shipments") {
     val shipDate = timestampWithTimeZone("ship_date").nullable()
     val labelCostMinor = long("label_cost_minor").nullable()
     val labelLedgerEntryId = long("label_ledger_entry_id").nullable()
+    val labelDocumentId = long("label_document_id").nullable()
     val createdAt = timestampWithTimeZone("created_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
@@ -230,6 +231,7 @@ data class ShipmentView(
     val trackingCode: String?,
     val labelCostMinor: Long?,
     val at: String?,
+    val labelDocumentId: Long? = null,
 )
 
 @Serializable
@@ -255,6 +257,7 @@ data class OrderDetail(
     val shipEstimateSource: String? = null, // usps | profile
     val shipments: List<ShipmentView> = emptyList(),
     val shipPackage: ShipPackageInfo? = null, // box + computed weight for the Ship sheet
+    val uspsLabelEnabled: Boolean = false, // Path B: connection toggle + label config complete
     val shipName: String?,
     val shipLine1: String?,
     val shipLine2: String?,
@@ -615,6 +618,15 @@ class SyncService(
                         else Triple(row[PlatformLedgerTable.entryId], -row[PlatformLedgerTable.amountMinor], gap)
                     }.minByOrNull { it.third }
             }
+            // Path B rows exist before Etsy echoes them back — adopt, don't duplicate
+            val adopted = sh.trackingCode?.let { tc ->
+                dbQuery {
+                    ShipmentsTable.update({
+                        (ShipmentsTable.orderId eq orderId) and (ShipmentsTable.trackingCode eq tc) and ShipmentsTable.etsyShippingId.isNull()
+                    }) { it[etsyShippingId] = key }
+                } > 0
+            } ?: false
+            if (adopted) continue
             dbQuery {
                 ShipmentsTable.insert {
                     it[ShipmentsTable.orderId] = orderId
@@ -1139,6 +1151,84 @@ class SyncService(
         return short
     }
 
+    @kotlinx.serialization.Serializable
+    data class BuyLabelResult(
+        val ok: Boolean,
+        val error: String? = null,
+        val trackingCode: String? = null,
+        val labelCostMinor: Long? = null,
+        val labelDocumentId: Long? = null,
+        val etsyReported: Boolean = false,
+    )
+
+    /** Path B (locked ship concept): buy a USPS label for the order, store
+     *  the PDF as a document, record the shipment, report tracking to Etsy.
+     *  The poll's completion watcher takes it from there. */
+    suspend fun buyUspsLabel(orderId: Long): BuyLabelResult {
+        val o = dbQuery { OrdersTable.selectAll().where { OrdersTable.id eq orderId }.singleOrNull() }
+            ?: return BuyLabelResult(false, "Order not found.")
+        val name = o[OrdersTable.shipName] ?: return BuyLabelResult(false, "The order has no ship-to name.")
+        val street = o[OrdersTable.shipLine1] ?: return BuyLabelResult(false, "The order has no street address.")
+        val city = o[OrdersTable.shipCity] ?: return BuyLabelResult(false, "The order has no city.")
+        val state = o[OrdersTable.shipState] ?: return BuyLabelResult(false, "The order has no state.")
+        val zip = o[OrdersTable.shipZip] ?: return BuyLabelResult(false, "The order has no ZIP.")
+        if ((o[OrdersTable.shipCountry] ?: "US").uppercase() !in setOf("US", "USA", "UNITED STATES")) {
+            return BuyLabelResult(false, "International order — buy this label on Etsy (GlobalPost routing).")
+        }
+        val profileIds = dbQuery {
+            OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq orderId }.toList()
+        }.mapNotNull { it[OrderLinesTable.matchedListingId] }.distinct()
+            .mapNotNull { lid -> listings.get(lid)?.input?.packagingProfileId }.distinct()
+        val pkg = packageFor(o, profileIds)
+        val weight = pkg.weightGrams
+            ?: return BuyLabelResult(false, "Package weight unknown — set the product's ship weight or per-piece material weights.")
+        val dims = pkg.dims
+            ?: return BuyLabelResult(false, "Box dimensions unknown — set L×W×H on the packaging box material.")
+        val bought = try {
+            connections.uspsBuyLabel(
+                toName = name, toStreet = street, toStreet2 = o[OrdersTable.shipLine2],
+                toCity = city, toState = state, toZip = zip,
+                weightGrams = weight, lengthIn = dims.first, widthIn = dims.second, heightIn = dims.third,
+            )
+        } catch (e: Exception) {
+            return BuyLabelResult(false, e.message ?: "USPS label purchase failed.")
+        }
+        val docId = connections.documentsSaver?.invoke(
+            "usps-label", "application/pdf", "usps-label-${o[OrdersTable.platformOrderId]}.pdf", bought.labelPdf,
+        )
+        dbQuery {
+            ShipmentsTable.insert {
+                it[ShipmentsTable.orderId] = orderId
+                it[shipSource] = "usps"
+                it[carrierName] = "usps"
+                it[trackingCode] = bought.trackingNumber
+                it[weightGrams] = weight
+                it[lengthIn] = dims.first
+                it[widthIn] = dims.second
+                it[heightIn] = dims.third
+                it[shipDate] = OffsetDateTime.now()
+                it[labelCostMinor] = bought.postageMinor
+                it[labelDocumentId] = docId
+            }
+            OrderEventsTable.insert {
+                it[OrderEventsTable.orderId] = orderId
+                it[fromCategory] = null
+                it[toCategory] = "USPS label bought — ${'$'}{bought.trackingNumber}"
+            }
+        }
+        val etsyErr = connections.reportEtsyShipment(
+            o[OrdersTable.connectionId], o[OrdersTable.platformOrderId], bought.trackingNumber, "usps",
+        )
+        return BuyLabelResult(
+            ok = true,
+            error = etsyErr?.let { "Label bought, but Etsy wasn't notified: ${'$'}it" },
+            trackingCode = bought.trackingNumber,
+            labelCostMinor = bought.postageMinor,
+            labelDocumentId = docId,
+            etsyReported = etsyErr == null,
+        )
+    }
+
     suspend fun listOrders(includeArchived: Boolean = false): List<OrderView> {
         // configId -> (sku, productName, colors); listingId -> productName
         var listingProductNames = mapOf<Long, String>()
@@ -1360,13 +1450,22 @@ class SyncService(
                         carrierName = sr[ShipmentsTable.carrierName],
                         trackingCode = sr[ShipmentsTable.trackingCode],
                         labelCostMinor = sr[ShipmentsTable.labelCostMinor],
+                        labelDocumentId = sr[ShipmentsTable.labelDocumentId],
                         at = sr[ShipmentsTable.shipDate]?.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                     )
                 }
         }
 
+        val uspsLabelEnabled = dbQuery {
+            ConnectionsTable.selectAll().where { ConnectionsTable.platform eq "usps" }
+                .andWhere { ConnectionsTable.status eq "connected" }.firstOrNull()
+        }?.get(ConnectionsTable.config)?.let { cfg ->
+            cfg["labelPurchase"] == "true" && connections.uspsLabelConfigured(cfg) == null
+        } ?: false
+
         return OrderDetail(
             order = summary,
+            uspsLabelEnabled = uspsLabelEnabled,
             shipFeesMinor = shipFees,
             shipEstimateMinor = shipEstimate,
             shipEstimateSource = shipEstimateSource,

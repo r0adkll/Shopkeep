@@ -67,8 +67,9 @@ type OrderDetail = {
   shipFeesMinor: number | null;
   shipEstimateMinor: number | null;
   shipEstimateSource: "usps" | "profile" | null;
-  shipments: { source: string; carrierName: string | null; trackingCode: string | null; labelCostMinor: number | null; at: string | null }[];
+  shipments: { source: string; carrierName: string | null; trackingCode: string | null; labelCostMinor: number | null; at: string | null; labelDocumentId: number | null }[];
   shipPackage: { boxName: string | null; weightGrams: number | null } | null;
+  uspsLabelEnabled: boolean;
   shipName: string | null;
   shipLine1: string | null;
   shipLine2: string | null;
@@ -367,6 +368,18 @@ function OrderDetailPanel(props: {
   const [matching, setMatching] = useState<OrderLine | null>(null);
   const [shipOpen, setShipOpen] = useState(false);
   const [slipNote, setSlipNote] = useState(false);
+  // Path B: USPS label purchase (charges real postage — explicit tap only)
+  const buyLabel = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/v1/orders/${orderId}/usps-label`, { method: "POST" });
+      if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { message?: string } | null)?.message ?? r.statusText);
+      return (await r.json()) as { trackingCode: string; labelCostMinor: number | null; labelDocumentId: number | null; etsyReported: boolean; error: string | null };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["order", orderId] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+  });
   const slipUrl = (note: boolean) => `/api/v1/orders/${orderId}/packing-slip.pdf${note ? "?note=1" : ""}`;
   const [reresolveErr, setReresolveErr] = useState<string | null>(null);
   const reresolve = useMutation({
@@ -795,16 +808,49 @@ function OrderDetailPanel(props: {
                 </div>
               </div>
               <div className="border-t border-dotted border-line py-2.5">
-                <b className="text-[13px]">2 · Buy &amp; print the label on Etsy</b>
+                <b className="text-[13px]">2 · {d.uspsLabelEnabled ? "Buy the label" : "Buy & print the label on Etsy"}</b>
+                {d.uspsLabelEnabled && (
+                  <div className="mt-1.5">
+                    {buyLabel.data ? (
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="rounded-full bg-good/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wider text-good">LABEL BOUGHT</span>
+                        <span className="font-mono">{buyLabel.data.trackingCode}</span>
+                        {buyLabel.data.labelCostMinor != null && <span className="font-mono text-ink2">{money(buyLabel.data.labelCostMinor)}</span>}
+                        {buyLabel.data.labelDocumentId != null && (
+                          <button onClick={() => window.open(documentUrl(buyLabel.data!.labelDocumentId!), "_blank")}
+                            className="flex items-center gap-1 rounded-md border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/5">
+                            🖨 Print label
+                          </button>
+                        )}
+                        {buyLabel.data.etsyReported
+                          ? <span className="text-[11px] text-good">✓ tracking reported to Etsy</span>
+                          : <span className="text-[11px] font-medium text-warn">{buyLabel.data.error}</span>}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => buyLabel.mutate()}
+                          disabled={buyLabel.isPending || d.shipPackage?.weightGrams == null}
+                          title={d.shipPackage?.weightGrams == null ? "package weight unknown — set ship weights first" : "charges your EPS account"}
+                          className="rounded-md bg-accent px-3 py-1.5 text-xs font-bold text-white hover:opacity-90 disabled:opacity-50"
+                        >
+                          {buyLabel.isPending ? "Buying…" : `Buy USPS label${d.shipEstimateSource === "usps" && d.shipEstimateMinor != null ? ` · ~${money(d.shipEstimateMinor)}` : ""}`}
+                        </button>
+                        <span className="text-[11px] text-mut">charges your EPS account · reports tracking to Etsy</span>
+                      </div>
+                    )}
+                    {buyLabel.isError && <p className="mt-1 text-xs font-medium text-crit">{(buyLabel.error as Error).message}</p>}
+                  </div>
+                )}
                 <div className="mt-1.5 flex items-center gap-2">
                   <a
                     href={`https://www.etsy.com/your/orders/sold/${o.platformOrderId}/ship?order_id=${o.platformOrderId}&search_query=${o.platformOrderId}&orders_hash=${o.platformOrderId}a`}
                     target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1 rounded-md border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/5"
+                    className={`flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-semibold ${d.uspsLabelEnabled ? "border-line text-ink2 hover:border-accent hover:text-accent" : "border-accent/40 text-accent hover:bg-accent/5"}`}
                   >
-                    <ExternalLink size={12} /> Buy label on Etsy
+                    <ExternalLink size={12} /> {d.uspsLabelEnabled ? "or buy on Etsy (intl, odd sizes)" : "Buy label on Etsy"}
                   </a>
-                  <span className="text-[11px] text-mut">opens the shipping-label page directly</span>
+                  {!d.uspsLabelEnabled && <span className="text-[11px] text-mut">opens the shipping-label page directly</span>}
                 </div>
               </div>
               <div className="border-t border-dotted border-line py-2.5">
