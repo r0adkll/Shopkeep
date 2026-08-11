@@ -1065,6 +1065,35 @@ class SyncService(
     /** Re-run matching on demand: backfill platform listing ids that early
      *  ingests never stamped (from the Etsy receipt), then retro-match every
      *  unmatched line whose platform listing resolves to a canonical listing. */
+    /** Retro-pair unclaimed shipping_labels ledger entries with cost-less
+     *  shipments (same ±6h nearest-gap heuristic as capture time). Capture
+     *  misses whenever the ledger poll lands after the shipment poll — this
+     *  runs every cycle and heals both directions. */
+    suspend fun attributeLabelCosts(): Int = dbQuery {
+        val claimed = ShipmentsTable.selectAll()
+            .mapNotNull { it[ShipmentsTable.labelLedgerEntryId] }.toMutableSet()
+        val entries = PlatformLedgerTable.selectAll()
+            .where { PlatformLedgerTable.ledgerType eq "shipping_labels" }.toList()
+        var n = 0
+        ShipmentsTable.selectAll().where { ShipmentsTable.labelCostMinor.isNull() }.toList().forEach { srow ->
+            val shipAt = srow[ShipmentsTable.shipDate] ?: return@forEach
+            val best = entries.mapNotNull { e ->
+                val at = e[PlatformLedgerTable.createdAt] ?: return@mapNotNull null
+                val gap = Math.abs(at.toEpochSecond() - shipAt.toEpochSecond())
+                if (gap > 6 * 3600 || e[PlatformLedgerTable.entryId] in claimed) null
+                else Triple(e[PlatformLedgerTable.entryId], -e[PlatformLedgerTable.amountMinor], gap)
+            }.minByOrNull { it.third } ?: return@forEach
+            if (best.second <= 0) return@forEach
+            claimed += best.first
+            ShipmentsTable.update({ ShipmentsTable.id eq srow[ShipmentsTable.id] }) {
+                it[labelCostMinor] = best.second
+                it[labelLedgerEntryId] = best.first
+            }
+            n++
+        }
+        n
+    }
+
     /** Boot sweep: reconcile order-level reservations (packaging bands +
      *  per-order extras) across every open order. Net-based and cheap at
      *  shop scale, so it runs at every startup — heals orders matched before
@@ -1450,9 +1479,22 @@ class SyncService(
                     ?.get(app.shopkeep.listings.PackagingProfilesTable.shipCostEstimateMinor)
             }
         }.maxOrNull()
-        val uspsEstimate = uspsEstimateFor(o, profileIds)
-        val shipEstimate = uspsEstimate ?: staticEstimate
-        val shipEstimateSource = if (uspsEstimate != null) "usps" else if (staticEstimate != null) "profile" else null
+        // Actual beats estimate: once a shipment carries a real label cost
+        // (Etsy ledger attribution or a Path B purchase), show that — and
+        // skip quoting USPS entirely for orders that already shipped.
+        val actualLabelCost = dbQuery {
+            ShipmentsTable.selectAll().where { ShipmentsTable.orderId eq orderId }
+                .mapNotNull { it[ShipmentsTable.labelCostMinor] }.sum()
+        }.takeIf { it > 0 }
+        val shipped = o[OrdersTable.platformShipped] || o[OrdersTable.completedAt] != null
+        val uspsEstimate = if (actualLabelCost != null || shipped) null else uspsEstimateFor(o, profileIds)
+        val shipEstimate = actualLabelCost ?: uspsEstimate ?: staticEstimate
+        val shipEstimateSource = when {
+            actualLabelCost != null -> "actual"
+            uspsEstimate != null -> "usps"
+            staticEstimate != null -> "profile"
+            else -> null
+        }
         val pkg = packageFor(o, profileIds)
         val shipmentRows = dbQuery {
             ShipmentsTable.selectAll().where { ShipmentsTable.orderId eq orderId }

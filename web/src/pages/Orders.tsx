@@ -66,7 +66,7 @@ type OrderDetail = {
   order: Order;
   shipFeesMinor: number | null;
   shipEstimateMinor: number | null;
-  shipEstimateSource: "usps" | "profile" | null;
+  shipEstimateSource: "actual" | "usps" | "profile" | null;
   shipments: { source: string; carrierName: string | null; trackingCode: string | null; labelCostMinor: number | null; at: string | null; labelDocumentId: number | null }[];
   shipPackage: { boxName: string | null; weightGrams: number | null } | null;
   uspsLabelEnabled: boolean;
@@ -663,13 +663,17 @@ function OrderDetailPanel(props: {
                         <tr><td className="py-0.5 text-ink2" title="per-product labor × global labor rate">Labor</td><td className="py-0.5 text-right font-mono text-ink2">−{money(d.laborMinor ?? 0)}</td></tr>
                         {d.shipEstimateMinor != null && (
                           <tr>
-                            <td className="py-0.5 text-ink2" title={d.shipEstimateSource === "usps"
-                              ? "live USPS commercial-rate quote from this order's weight, box, and destination ZIP"
-                              : "expected postage from the packaging profile — connect USPS for live quotes"}>
+                            <td className="py-0.5 text-ink2" title={d.shipEstimateSource === "actual"
+                              ? "the label actually purchased for this order (Etsy payment ledger / USPS purchase)"
+                              : d.shipEstimateSource === "usps"
+                                ? "live USPS commercial-rate quote from this order's weight, box, and destination ZIP"
+                                : "expected postage from the packaging profile — connect USPS for live quotes"}>
                               Shipping label{" "}
-                              {d.shipEstimateSource === "usps"
-                                ? <span className="rounded bg-accent/10 px-1 text-[8.5px] font-extrabold tracking-wider text-accent">USPS EST</span>
-                                : <span className="rounded bg-warn/10 px-1 text-[8.5px] font-extrabold tracking-wider text-warn">EST</span>}
+                              {d.shipEstimateSource === "actual"
+                                ? <span className="rounded bg-good/10 px-1 text-[8.5px] font-extrabold tracking-wider text-good">ACTUAL</span>
+                                : d.shipEstimateSource === "usps"
+                                  ? <span className="rounded bg-accent/10 px-1 text-[8.5px] font-extrabold tracking-wider text-accent">USPS EST</span>
+                                  : <span className="rounded bg-warn/10 px-1 text-[8.5px] font-extrabold tracking-wider text-warn">EST</span>}
                             </td>
                             <td className="py-0.5 text-right font-mono text-ink2">−{money(d.shipEstimateMinor)}</td>
                           </tr>
@@ -785,7 +789,7 @@ function OrderDetailPanel(props: {
               </div>
               {d.shipEstimateMinor != null && (
                 <p className="mb-2 text-[11px] text-mut">
-                  Shipping label {d.shipEstimateSource === "usps" ? "quote" : "estimate"} {money(d.shipEstimateMinor)} — replaced by the actual ledger cost once Etsy reports the label.
+                  Shipping label {d.shipEstimateSource === "actual" ? "cost" : d.shipEstimateSource === "usps" ? "quote" : "estimate"} {money(d.shipEstimateMinor)}{d.shipEstimateSource === "actual" ? " — the label bought for this order." : " — replaced by the actual cost once the label is bought."}
                 </p>
               )}
               <div className="border-t border-dotted border-line py-2.5">

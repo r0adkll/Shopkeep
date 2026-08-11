@@ -122,6 +122,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
                 .onFailure { log.warn("storefront sync failed: ${it.message}") }
             // Q8: completed orders leave the active board after the window.
             runCatching { graph.syncService.archiveCompleted(config.orderArchiveDays) }
+            runCatching { graph.syncService.attributeLabelCosts() }
             runCatching { graph.filamentCatalog.refreshIfStale() }
                 .onFailure { log.warn("Filament catalog refresh failed: {}", it.message) }
                 .onFailure { log.warn("order archive sweep failed: ${it.message}") }
