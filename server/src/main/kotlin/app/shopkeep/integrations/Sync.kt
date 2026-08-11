@@ -644,16 +644,21 @@ class SyncService(
         }
     }
 
-    /** Cancellation: outstanding reservations come back (lifecycle invariant #3). */
+    /** Cancellation: outstanding reservations come back (lifecycle invariant
+     *  #3). Nets reservation vs release rows — re-resolves leave released
+     *  generations behind; negating every reservation row over-released. */
     private suspend fun releaseReservations(platformOrderId: String) = dbQuery {
         val note = "Order #$platformOrderId"
         app.shopkeep.inventory.InventoryTransactionsTable.selectAll()
-            .where { app.shopkeep.inventory.InventoryTransactionsTable.kind eq "reservation" }
+            .where { app.shopkeep.inventory.InventoryTransactionsTable.kind inList listOf("reservation", "release") }
             .andWhere { app.shopkeep.inventory.InventoryTransactionsTable.note like "$note%" }
-            .forEach { txn ->
+            .groupBy { it[app.shopkeep.inventory.InventoryTransactionsTable.materialId] }
+            .mapValues { (_, rows) -> rows.sumOf { it[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble() } }
+            .filterValues { it < -0.0005 }
+            .forEach { (mid, outstanding) ->
                 app.shopkeep.inventory.InventoryTransactionsTable.insert {
-                    it[materialId] = txn[app.shopkeep.inventory.InventoryTransactionsTable.materialId]
-                    it[delta] = txn[app.shopkeep.inventory.InventoryTransactionsTable.delta].negate()
+                    it[materialId] = mid
+                    it[delta] = java.math.BigDecimal.valueOf(-outstanding)
                     it[kind] = TxnKind.RELEASE.name.lowercase()
                     it[app.shopkeep.inventory.InventoryTransactionsTable.note] = "$note (canceled)"
                 }
@@ -1092,6 +1097,96 @@ class SyncService(
             n++
         }
         n
+    }
+
+    /** One-shot repair for the generation-multiplication bug: completion
+     *  converted EVERY reservation row (including generations already
+     *  released by re-resolves), multiplying consumption and driving
+     *  reserved negative. Recomputes each finished order's true consumption
+     *  (line reserved BOMs + packaging band + per-order extras), then writes
+     *  corrective rows. Idempotent — a healthy order diffs to zero. */
+    suspend fun repairLedgerConversions(): Int {
+        val txns = app.shopkeep.inventory.InventoryTransactionsTable
+        var repaired = 0
+        val orders = dbQuery { OrdersTable.selectAll().toList() }
+        for (o in orders) {
+            val completed = o[OrdersTable.completedAt] != null
+            val dead = o[OrdersTable.platformStatus] in setOf("canceled", "fully refunded")
+            if (!completed && !dead) continue
+            val pid = o[OrdersTable.platformOrderId]
+            val note = "Order #$pid"
+            val rows = dbQuery {
+                txns.selectAll().where { txns.note like "$note%" }.toList()
+            }.filter { (it[txns.note] ?: "").removePrefix("Order #").takeWhile { c -> c.isDigit() } == pid }
+            if (rows.isEmpty()) continue
+            fun sumBy(kinds: Set<String>) = rows.filter { it[txns.kind] in kinds }
+                .groupBy { it[txns.materialId] }
+                .mapValues { (_, r) -> r.sumOf { it[txns.delta].toDouble() } }
+            val resNet = sumBy(setOf("reservation", "release"))
+            val consumed = sumBy(setOf("consumption"))
+
+            // expected consumption: only recomputable when every matched line
+            // still carries its reserved BOM
+            var expected: MutableMap<Long, Double>? = mutableMapOf()
+            if (completed) {
+                val lines = dbQuery { OrderLinesTable.selectAll().where { OrderLinesTable.orderId eq o[OrdersTable.id] }.toList() }
+                val units = mutableMapOf<Long, Int>()
+                for (l in lines) {
+                    val listingId = l[OrderLinesTable.listingConfigurationId]?.let { c ->
+                        dbQuery {
+                            ListingConfigurationsTable.selectAll().where { ListingConfigurationsTable.id eq c }
+                                .singleOrNull()?.get(ListingConfigurationsTable.listingId)
+                        }
+                    } ?: l[OrderLinesTable.matchedListingId] ?: continue
+                    units[listingId] = (units[listingId] ?: 0) + l[OrderLinesTable.quantity]
+                    val bom = l[OrderLinesTable.reservedBom]
+                    if (bom == null) { expected = null; break }
+                    for (b in bom) expected!![b.materialId] = (expected!![b.materialId] ?: 0.0) - b.qty * l[OrderLinesTable.quantity]
+                }
+                if (expected != null) {
+                    for ((listingId, u) in units) {
+                        val input = listings.get(listingId)?.input ?: continue
+                        input.packagingProfileId?.let { profileId ->
+                            listings.resolvePackaging(profileId, u).band?.let { band ->
+                                for (m in band.materials) expected!![m.materialId] = (expected!![m.materialId] ?: 0.0) - m.quantity
+                            }
+                        }
+                        for (e in input.extras) if (e.basis == "per_order") expected!![e.materialId] = (expected!![e.materialId] ?: 0.0) - e.quantity
+                    }
+                }
+            } else expected = null // canceled: leave consumption as-is, just zero reserved
+
+            var touched = false
+            dbQuery {
+                // reserved must net to zero on any finished order
+                for ((mid, net) in resNet) {
+                    if (kotlin.math.abs(net) < 0.0005) continue
+                    touched = true
+                    txns.insert {
+                        it[materialId] = mid
+                        it[delta] = java.math.BigDecimal.valueOf(-net)
+                        it[kind] = (if (net < 0) TxnKind.RELEASE else TxnKind.RESERVATION).name.lowercase()
+                        it[txns.note] = "$note (conversion repair)"
+                    }
+                }
+                // consumption back to the true single-generation amount
+                if (expected != null) {
+                    for (mid in (expected!!.keys + consumed.keys)) {
+                        val diff = (expected!![mid] ?: 0.0) - (consumed[mid] ?: 0.0)
+                        if (kotlin.math.abs(diff) < 0.0005) continue
+                        touched = true
+                        txns.insert {
+                            it[materialId] = mid
+                            it[delta] = java.math.BigDecimal.valueOf(diff)
+                            it[kind] = TxnKind.CONSUMPTION.name.lowercase()
+                            it[txns.note] = "$note (conversion repair)"
+                        }
+                    }
+                }
+            }
+            if (touched) repaired++
+        }
+        return repaired
     }
 
     /** Boot sweep: reconcile order-level reservations (packaging bands +

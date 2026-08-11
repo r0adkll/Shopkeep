@@ -169,15 +169,20 @@ class LaneRepository(private val materials: MaterialRepository) {
                 it[OrderEventsTable.userId] = userId
             }
             if (target.role == "done" && fromLane?.role != "done" && order[OrdersTable.completedAt] == null) {
-                // reservations -> consumption (vault lifecycle invariant #2)
+                // reservations -> consumption (vault lifecycle invariant #2).
+                // Convert the NET OUTSTANDING per material — re-resolves leave
+                // released generations of reservation rows behind, and
+                // converting every row multiplied consumption by generation
+                // count (and over-released reserved into negative territory).
                 val note = "Order #${order[OrdersTable.platformOrderId]}"
                 app.shopkeep.inventory.InventoryTransactionsTable.selectAll()
-                    .where { app.shopkeep.inventory.InventoryTransactionsTable.kind eq "reservation" }
+                    .where { app.shopkeep.inventory.InventoryTransactionsTable.kind inList listOf("reservation", "release") }
                     .andWhere { app.shopkeep.inventory.InventoryTransactionsTable.note like "$note%" }
-                    .forEach { txn ->
-                        val delta = txn[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble()
-                        val mid = txn[app.shopkeep.inventory.InventoryTransactionsTable.materialId]
-                        listOf(TxnKind.RELEASE to -delta, TxnKind.CONSUMPTION to delta).forEach { (kind, d) ->
+                    .groupBy { it[app.shopkeep.inventory.InventoryTransactionsTable.materialId] }
+                    .mapValues { (_, rows) -> rows.sumOf { it[app.shopkeep.inventory.InventoryTransactionsTable.delta].toDouble() } }
+                    .filterValues { it < -0.0005 } // negative = still held
+                    .forEach { (mid, outstanding) ->
+                        listOf(TxnKind.RELEASE to -outstanding, TxnKind.CONSUMPTION to outstanding).forEach { (kind, d) ->
                             app.shopkeep.inventory.InventoryTransactionsTable.insert {
                                 it[materialId] = mid
                                 it[app.shopkeep.inventory.InventoryTransactionsTable.delta] = java.math.BigDecimal.valueOf(d)
