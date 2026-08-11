@@ -227,6 +227,8 @@ data class EtsyReceipts(val count: Int = 0, val results: List<EtsyReceipt> = emp
 data class UspsToken(
     @SerialName("access_token") val accessToken: String = "",
     @SerialName("expires_in") val expiresIn: Long = 3600,
+    /** Granted scopes mirror the app's API products in the USPS portal. */
+    val scope: String = "",
 )
 
 @Serializable
@@ -956,7 +958,23 @@ class ConnectionRepository(private val config: AppConfig, private val http: Http
             contentType(io.ktor.http.ContentType.Application.Json)
             setBody("""{"roles":[${role("PAYER")},${role("LABEL_OWNER")}]}""")
         }
-        if (!resp.status.isSuccess()) error("USPS payment authorization ${resp.status.value}: ${resp.bodyAsText().take(300)}")
+        if (!resp.status.isSuccess()) {
+            val bodyText = resp.bodyAsText()
+            // Scopes mirror the app's API-product subscriptions — the default
+            // set has no 'payments'. Say what's missing and where to fix it.
+            if (bodyText.contains("scope", ignoreCase = true)) {
+                val granted = runCatching {
+                    uspsToken(row[ConnectionsTable.apiKeystring], row[ConnectionsTable.apiSharedSecretEnc]?.let(crypto::decrypt) ?: "", uspsBase(row)).scope
+                }.getOrNull()
+                val missing = listOf("payments", "labels").filter { granted?.contains(it) == false }
+                error(
+                    "Your USPS app key lacks the ${missing.ifEmpty { listOf("payments") }.joinToString(" + ")} API" +
+                        " — add the Payments and Labels API products to the app in the USPS developer portal, then retry." +
+                        (granted?.let { " (key currently grants: ${it.ifBlank { "none" }})" } ?: ""),
+                )
+            }
+            error("USPS payment authorization ${resp.status.value}: ${bodyText.take(300)}")
+        }
         val token = looseJson.parseToJsonElement(resp.bodyAsText())
             .jsonObject["paymentAuthorizationToken"]?.jsonPrimitive?.content
             ?: error("USPS payment authorization: no token in response")
