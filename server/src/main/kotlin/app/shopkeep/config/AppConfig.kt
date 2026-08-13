@@ -22,6 +22,8 @@ data class AppConfig(
      *  backed up as a tar alongside pg_dump (vault: D21). */
     val mediaDir: String,
     val syncIntervalMinutes: Long,
+    /** Minimum gap between view-triggered syncs (D24); opening the orders screen inside the window is a no-op. */
+    val viewSyncCooldownSeconds: Long,
     /** Completed orders archive off the board after this many days (Q8). */
     val orderArchiveDays: Long,
     val etsyAuthBase: String,
@@ -55,6 +57,7 @@ data class AppConfig(
                 etsyMock = devMode && env["ETSY_MOCK"] == "true",
                 mediaDir = env["MEDIA_DIR"] ?: "data/media",
                 syncIntervalMinutes = env["SYNC_INTERVAL_MINUTES"]?.toLongOrNull() ?: 5,
+                viewSyncCooldownSeconds = env["VIEW_SYNC_COOLDOWN_SECONDS"]?.toLongOrNull() ?: 60,
                 orderArchiveDays = env["ORDER_ARCHIVE_DAYS"]?.toLongOrNull() ?: 30,
                 etsyAuthBase = env["ETSY_AUTH_BASE"] ?: "https://www.etsy.com/oauth/connect",
                 etsyTokenBase = env["ETSY_TOKEN_BASE"] ?: "https://api.etsy.com/v3/public/oauth/token",

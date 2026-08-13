@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DesignsTab, VariantsTab } from "./DesignsEditor";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,7 +7,7 @@ import {
   inventoryApi,
   matchesQuery,
   materialColor,
-  parseQty,
+  parseQtyAs,
   sortMaterials,
   type Material,
   type SortKey,
@@ -15,6 +15,7 @@ import {
 import { MaterialIcon } from "../inventory/MaterialIcon";
 import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
 import { MaterialForm } from "../inventory/MaterialForm";
+import { QtyField } from "../inventory/QtyField";
 import { Button, ErrorText, Field } from "../ui";
 import { catalogApi, documentUrl, uploadImage, type Product, type ProductInput, type Rule, type Slot } from "./api";
 
@@ -182,10 +183,11 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                 value={String(p.laborMinutes || "")}
                 onChange={(v) => set({ laborMinutes: parseInt(v) || 0 })}
               />
-              <Field
-                label="Ship wt (g, opt.)"
-                value={p.shipWeightGrams != null ? String(p.shipWeightGrams) : ""}
-                onChange={(v) => set({ shipWeightGrams: v ? parseInt(v) || 0 : null })}
+              <QtyField
+                label="Ship wt (g or oz, opt.)"
+                unit="g"
+                value={p.shipWeightGrams ?? null}
+                onChange={(g) => set({ shipWeightGrams: g == null ? null : Math.round(g) })}
               />
             </div>
           </div>
@@ -324,7 +326,17 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
                   const keep = p.rules.filter(
                     (r) => !(r.whenMaterialIds.length === 1 && r.whenSlot === whenSlot && r.thenSlot === thenSlot),
                   );
-                  set({ rules: [...keep, ...compiled] });
+                  // The map's picker roams the whole filament wall — fold any
+                  // out-of-palette pick into the slot so cost ranges/coverage
+                  // keep describing everything the rules can produce.
+                  const palette = new Set(p.slots[thenSlot]?.optionMaterialIds ?? []);
+                  const extra = [...new Set(compiled.map((r) => r.thenMaterialId).filter((id) => !palette.has(id)))];
+                  set({
+                    rules: [...keep, ...compiled],
+                    slots: extra.length
+                      ? p.slots.map((s, i) => (i === thenSlot ? { ...s, optionMaterialIds: [...s.optionMaterialIds, ...extra] } : s))
+                      : p.slots,
+                  });
                   setComposer(null);
                 }}
                 onSave={(rule) => {
@@ -410,19 +422,19 @@ export function RecipeEditor({ existing, onClose }: { existing?: Product; onClos
 /* ---------------- quantity input ---------------- */
 
 /** String-buffered so decimals type naturally ("0." doesn't collapse) and
- *  fraction shorthand works: "1/20" commits as 0.05. */
-function QtyInput({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
+ *  fraction shorthand works: "1/20" commits as 0.05. Gram slots take oz too. */
+function QtyInput({ value, unit, onCommit }: { value: number; unit?: string; onCommit: (v: number) => void }) {
   const [raw, setRaw] = useState(value ? formatQty(value) : "");
   return (
     <input
       value={raw}
       onChange={(e) => {
         setRaw(e.target.value);
-        const parsed = parseQty(e.target.value);
+        const parsed = parseQtyAs(unit ?? "", e.target.value);
         if (parsed != null && parsed >= 0) onCommit(parsed);
       }}
       onBlur={() => {
-        const parsed = parseQty(raw);
+        const parsed = parseQtyAs(unit ?? "", raw);
         setRaw(parsed != null && parsed > 0 ? formatQty(parsed) : value ? formatQty(value) : "");
       }}
       placeholder="0.05 or 1/20"
@@ -609,7 +621,7 @@ function SlotCard({
           {slot.kind === "RULE" ? "DYNAMIC · BY RULE" : slot.kind}
         </span>
         <label className="ml-auto flex items-center gap-1.5 text-xs text-ink2">
-          <QtyInput value={slot.quantity} onCommit={(quantity) => onChange({ quantity })} />
+          <QtyInput value={slot.quantity} unit={unit ?? ""} onCommit={(quantity) => onChange({ quantity })} />
           {unit ?? "unit"} / unit
         </label>
         <button
@@ -966,33 +978,57 @@ function MapGrid({
   });
 
   const mapped = [...map.values()].filter((v) => v != null).length;
+  // Which source row's target is being picked; the picker shows the whole
+  // filament wall (locked category), not just the slot palette — out-of-palette
+  // picks are folded into the palette on save upstream.
+  const [picking, setPicking] = useState<number | null>(null);
 
   return (
     <>
       <div className="mt-2 max-h-80 overflow-y-auto">
         {[...map.entries()].map(([srcId, tgtId]) => {
           const sm = byId.get(srcId);
+          const tm = tgtId != null ? byId.get(tgtId) : undefined;
           return (
             <div key={srcId} className="flex items-center gap-2.5 border-b border-line/50 py-1.5 text-[13px] last:border-0">
               <span className="h-3.5 w-3.5 flex-none rounded-full border border-line" style={{ background: sm ? (materialColor(sm) ?? "var(--color-panel2)") : undefined }} />
               <span className="w-52 flex-none truncate" title={sm?.name}>{sm?.name ?? "?"}</span>
               <span className="text-[11px] text-mut">→</span>
-              <select
-                value={tgtId ?? ""}
-                onChange={(e) => setMap((prev) => new Map(prev).set(srcId, e.target.value ? +e.target.value : null))}
-                className="min-w-0 flex-1 rounded-md border border-line bg-panel2 px-2 py-1 text-xs"
+              <button
+                type="button"
+                onClick={() => setPicking(srcId)}
+                title="pick the mapped filament"
+                className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-panel2 px-2 py-1 text-left text-xs hover:border-accent"
               >
-                <option value="">— fall through to default</option>
-                {targetIds.map((tid) => <option key={tid} value={tid}>{byId.get(tid)?.name}</option>)}
-              </select>
-              <span
-                className="h-3.5 w-3.5 flex-none rounded-full border border-line"
-                style={{ background: tgtId != null ? (materialColor(byId.get(tgtId)!) ?? "var(--color-panel2)") : "transparent" }}
-              />
+                <span
+                  className="h-3.5 w-3.5 flex-none rounded-full border border-line"
+                  style={{ background: tm ? (materialColor(tm) ?? "var(--color-panel2)") : "transparent" }}
+                />
+                <span className={`min-w-0 truncate ${tm ? "" : "text-mut"}`}>{tm?.name ?? "— fall through to default"}</span>
+              </button>
+              {tgtId != null && (
+                <button
+                  type="button"
+                  title="clear — fall through to default"
+                  onClick={() => setMap((prev) => new Map(prev).set(srcId, null))}
+                  className="flex-none rounded-md border border-line p-1 text-mut hover:border-crit hover:text-crit"
+                >
+                  <X size={12} />
+                </button>
+              )}
             </div>
           );
         })}
       </div>
+      {picking != null && (
+        <MaterialPickerDialog
+          all={[...byId.values()]}
+          lockCategory="filament"
+          title={`Map ${byId.get(picking)?.name ?? "?"} → …`}
+          onPick={(id) => { setMap((prev) => new Map(prev).set(picking, id)); setPicking(null); }}
+          onClose={() => setPicking(null)}
+        />
+      )}
       <div className="mt-3 flex gap-2">
         <button
           type="button"

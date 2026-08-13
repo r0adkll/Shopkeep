@@ -255,6 +255,24 @@ export function parseQty(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+const GRAMS_PER_OZ = 28.3495;
+
+/** Weight entry in grams — the primary unit. Bare numbers (and parseQty
+ *  fractions) read as grams; an oz/ounce suffix converts (avoirdupois), and a
+ *  redundant g/gram suffix is accepted. null when incomplete/invalid. */
+export function parseGrams(raw: string): number | null {
+  const m = raw.trim().toLowerCase().match(/^([\d.\s/]+?)\s*(oz|ounces?|grams?|g)?$/);
+  if (!m) return null;
+  const n = parseQty(m[1]);
+  if (n == null) return null;
+  return m[2]?.startsWith("o") ? parseFloat((n * GRAMS_PER_OZ).toFixed(2)) : n;
+}
+
+/** Quantity in the material's own unit; oz suffixes convert when that unit is grams. */
+export function parseQtyAs(unit: string, raw: string): number | null {
+  return unit === "g" ? parseGrams(raw) : parseQty(raw);
+}
+
 export function formatCost(m: Material): string {
   const perUnit = m.costQuantity > 0 ? m.costMinor / 100 / m.costQuantity : 0;
   return `$${(m.costMinor / 100).toFixed(2)} / ${formatQty(m.costQuantity)} ${m.unit} ($${perUnit.toFixed(3)}/${m.unit})`;

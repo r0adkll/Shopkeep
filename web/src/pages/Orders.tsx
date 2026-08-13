@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ApiError, api } from "../api";
-import { ChevronLeft, ChevronRight, Copy, ExternalLink, Gift, Link2, Paperclip, RefreshCw, Settings2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, ExternalLink, Gift, Link2, Paperclip, Palette, RefreshCw, Settings2, Wrench, X } from "lucide-react";
 import { documentUrl, uploadImage } from "../catalog/api";
 import { AppShell } from "../ui";
 
@@ -13,6 +13,7 @@ import { AppShell } from "../ui";
 
 type Variation = { property_id: number; formatted_name: string; formatted_value: string };
 type LineColor = { hex: string | null; name: string };
+type MatchedComponent = { kind: "design" | "variant" | string; name: string };
 type OrderLine = {
   id: number;
   title: string;
@@ -27,6 +28,7 @@ type OrderLine = {
   productName: string | null;
   listingTitle: string | null;
   colors: LineColor[];
+  components: MatchedComponent[];
   variations: Variation[];
   personalization: Variation[];
 };
@@ -148,6 +150,12 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T;
 }
 
+type ViewSync = { status: "synced" | "fresh" | "already_running"; created: number };
+const syncedLabel = (iso: string) => {
+  const a = age(iso);
+  return a === "0m" ? "synced just now" : `synced ${a} ago`;
+};
+
 export function OrdersPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -178,15 +186,47 @@ export function OrdersPage() {
       }),
     onMutate: async ({ orderId, laneId }) => {
       await qc.cancelQueries({ queryKey: ["orders"] });
-      const prev = qc.getQueryData<Order[]>(["orders"]);
-      qc.setQueryData<Order[]>(["orders"], (os) =>
+      const prev = qc.getQueryData<Order[]>(["orders", showArchived]);
+      qc.setQueryData<Order[]>(["orders", showArchived], (os) =>
         (os ?? []).map((o) => (o.id === orderId ? { ...o, laneId } : o)),
       );
       return { prev };
     },
-    onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(["orders"], ctx.prev),
+    onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(["orders", showArchived], ctx.prev),
     onSettled: () => qc.invalidateQueries({ queryKey: ["orders"] }),
   });
+
+  // View-triggered sync (vault D24): landing on or refocusing the board asks the
+  // server to check Etsy now; its cooldown makes repeat asks a cheap no-op.
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
+  const viewSync = useMutation({
+    mutationFn: () => jsonFetch<ViewSync>("/api/v1/orders/sync", { method: "POST" }),
+    onSuccess: (r) => {
+      setLastCheckedAt(new Date().toISOString());
+      if (r.status === "synced") qc.invalidateQueries({ queryKey: ["orders"] });
+      // Background poll mid-run: it lands within seconds — re-read after it.
+      if (r.status === "already_running") setTimeout(() => qc.invalidateQueries({ queryKey: ["orders"] }), 5_000);
+    },
+  });
+  const syncFiredAt = useRef(0);
+  const requestViewSync = () => {
+    if (Date.now() - syncFiredAt.current < 30_000) return;
+    syncFiredAt.current = Date.now();
+    viewSync.mutate();
+  };
+  const signedIn = !!me.data;
+  useEffect(() => {
+    if (!signedIn) return;
+    requestViewSync();
+    const onVisible = () => document.visibilityState === "visible" && requestViewSync();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn]);
 
   const [dragId, setDragId] = useState<number | null>(null);
   const [overLane, setOverLane] = useState<number | null>(null);
@@ -211,6 +251,16 @@ export function OrdersPage() {
   return (
     <AppShell active="Orders" actions={
       <>
+        <button
+          type="button"
+          onClick={() => { syncFiredAt.current = 0; requestViewSync(); }}
+          disabled={viewSync.isPending}
+          title="Check the shop for new orders now (server-throttled)"
+          className="flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs text-mut hover:text-ink disabled:opacity-70"
+        >
+          <RefreshCw size={12} className={viewSync.isPending ? "animate-spin" : undefined} />
+          {viewSync.isPending ? "syncing…" : lastCheckedAt ? syncedLabel(lastCheckedAt) : "sync"}
+        </button>
         <button type="button" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}
           className={`rounded-full border px-3 py-1 text-xs ${showArchived ? "border-accent text-accent" : "border-line text-mut hover:text-ink"}`}>
           archived
@@ -445,7 +495,10 @@ function OrderDetailPanel(props: {
               <button onClick={onClose} title="close (esc)" className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-panel2 text-ink2 hover:border-accent hover:text-ink"><X size={14} /></button>
             </span>
           </div>
-          {o?.shipBy && (
+          {/* deadline pill only while shipping is still pending — shipped/
+              completed/dead orders have nothing left to be overdue for */}
+          {o?.shipBy && !d?.platformShipped && !d?.completedAt &&
+            o.platformStatus !== "completed" && !DEAD_STATUSES.includes(o.platformStatus) && (
             <div className="mt-0.5">
               <span
                 title="Etsy expected ship date"
@@ -565,6 +618,13 @@ function OrderDetailPanel(props: {
                       <span className="min-w-0 truncate text-sm font-bold" title={l.listingTitle ?? l.title}>{l.listingTitle ?? l.productName ?? l.title}</span>
                       <span className="ml-auto flex-none font-mono text-xs text-ink2">{money(l.priceMinor * l.quantity)}</span>
                     </div>
+                    {(l.components ?? []).map((c, i) => (
+                      <div key={`k${i}`} className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink2">
+                        {c.kind === "variant" ? <Wrench size={10} className="flex-none text-mut" /> : <Palette size={10} className="flex-none text-mut" />}
+                        <span className="min-w-0 truncate font-medium">{c.name}</span>
+                        <span className="flex-none text-[9px] font-extrabold tracking-wider text-mut uppercase">{c.kind}</span>
+                      </div>
+                    ))}
                     {l.colors.map((c, i) => (
                       <div key={i} className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink2">
                         <span className="h-2.5 w-2.5 flex-none rounded-full border border-line" style={{ background: c.hex ?? "var(--color-panel2)" }} />
@@ -1058,6 +1118,15 @@ function OrderCard(props: {
   const orderAge = age(o.placedAt);
   const old = orderAge.endsWith("d");
   const didDrag = useRef(false);
+  // The deadline pill is a call to action — once the order is confirmed
+  // shipped/completed (done lane, archived, Etsy "completed") or dead, an
+  // "overdue" countdown is just noise.
+  const shipPending =
+    o.shipBy != null &&
+    props.laneRole !== "done" &&
+    !o.archived &&
+    o.platformStatus !== "completed" &&
+    !DEAD_STATUSES.includes(o.platformStatus);
 
   return (
     <div
@@ -1086,7 +1155,7 @@ function OrderCard(props: {
           {orderAge}
         </span>
       </div>
-      {o.shipBy && (
+      {o.shipBy && shipPending && (
         <div>
           <span
             title={`Etsy expected ship date: ${new Date(o.shipBy).toLocaleDateString()}`}
@@ -1105,6 +1174,14 @@ function OrderCard(props: {
               <span className="min-w-0 truncate text-[13.5px] font-bold text-ink" title={l.listingTitle ?? l.title}>{l.listingTitle ?? l.productName ?? l.title}</span>
             </>
           );
+          // Matched design/variant identity leads — it's the name the maker
+          // recognizes ("the Charizard one"); material rows detail it below.
+          const comps = (l.components ?? []).map((c, i) => (
+            <div key={`k${i}`} title={c.kind} className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink2">
+              {c.kind === "variant" ? <Wrench size={10} className="flex-none text-mut" /> : <Palette size={10} className="flex-none text-mut" />}
+              <span className="min-w-0 truncate font-medium">{c.name}</span>
+            </div>
+          ));
           const rows = (l.colors.length > 0 ? l.colors : !l.matchedSku ? [{ hex: null, name: `unknown — raw sku ${l.rawSku ?? "—"}` }] : []).map(
             (c, i) => (
               <div key={i} className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-ink2">
@@ -1123,11 +1200,12 @@ function OrderCard(props: {
                 <span className="flex-none text-[9px] text-mut transition-transform group-open:rotate-90">▶</span>
                 {head}
               </summary>
-              <div className="min-w-0 pl-0">{rows}</div>
+              <div className="min-w-0 pl-0">{comps}{rows}</div>
             </details>
           ) : (
             <div key={l.id} className="min-w-0 text-xs text-ink2">
               <div className="flex min-w-0 items-center gap-1.5">{head}</div>
+              {comps}
               {rows}
             </div>
           );

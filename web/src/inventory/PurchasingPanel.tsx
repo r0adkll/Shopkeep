@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Plus } from "lucide-react";
-import { formatQty, materialColor, type Material } from "./api";
+import { formatQty, materialColor, parseQtyAs, type Material } from "./api";
 import { MaterialIcon } from "./MaterialIcon";
 import { MaterialPickerDialog } from "./MaterialPickerDialog";
 
@@ -234,10 +234,10 @@ export function PurchasingPanel({ allMaterials, onOpenDetail }: { allMaterials: 
               </label>
             </div>
             <div className="mt-4 flex gap-2">
-              <button type="button" disabled={!(parseFloat(rcvQty) > 0)}
+              <button type="button" disabled={!((parseQtyAs(receiving.material.unit, rcvQty) ?? 0) > 0)}
                 onClick={() => {
                   const body = {
-                    quantity: parseFloat(rcvQty),
+                    quantity: parseQtyAs(receiving.material.unit, rcvQty) ?? 0,
                     costMinor: rcvCost.trim() ? Math.round(parseFloat(rcvCost) * 100) : null,
                   };
                   act(() => post<Panel>(`/${receiving.id}/receive`, "POST", body));

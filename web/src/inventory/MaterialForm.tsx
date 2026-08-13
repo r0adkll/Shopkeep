@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { HexColorPicker } from "react-colorful";
-import { bestCatalogLink, inventoryApi, type CatalogFilament, type Material, type MaterialInput } from "./api";
+import { bestCatalogLink, formatQty, inventoryApi, parseGrams, parseQtyAs, type CatalogFilament, type Material, type MaterialInput } from "./api";
 import { FilamentCatalogDialog } from "./FilamentCatalogDialog";
+import { QtyField } from "./QtyField";
 import { Button, ErrorText, Field } from "../ui";
 
 /** Bambu Lab PLA Basic palette — the store's full color roster (variant list
@@ -204,9 +205,15 @@ export function MaterialForm({
           ? { ...m.attributes, color }
           : Object.fromEntries(Object.entries(m.attributes).filter(([k]) => k !== "color")),
       };
+      // Weight attrs are stored as gram strings — convert an oz entry that
+      // never blurred so the server's toDoubleOrNull doesn't drop it.
+      if (input.attributes.weightGrams) {
+        const w = parseGrams(input.attributes.weightGrams);
+        if (w != null) input.attributes = { ...input.attributes, weightGrams: formatQty(w) };
+      }
       return existing
         ? inventoryApi.update(existing.id, input)
-        : inventoryApi.create(input, parseFloat(initialQty) || undefined);
+        : inventoryApi.create(input, parseQtyAs(m.unit, initialQty) || undefined);
     },
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["materials"] });
@@ -215,8 +222,12 @@ export function MaterialForm({
     },
   });
 
-  const num = (v: string) => (v === "" ? null : parseFloat(v) || 0);
   const isFilament = !!profile?.colorPrimary;
+  // Normalizes a weight-attribute entry on blur: "2.1oz" becomes "59.53".
+  const weightAttrBlur = (k: string) => () => {
+    const w = parseGrams(m.attributes[k] ?? "");
+    if (w != null) setAttr(k, formatQty(w));
+  };
 
   // Paste-a-vendor-link prefill: fills only fields still untouched.
   const [prefillUrl, setPrefillUrl] = useState("");
@@ -467,6 +478,7 @@ export function MaterialForm({
                   <input
                     value={m.attributes.weightGrams ?? ""}
                     onChange={(e) => setAttr("weightGrams", e.target.value)}
+                    onBlur={weightAttrBlur("weightGrams")}
                     placeholder="60"
                     className="w-14 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
                   />
@@ -480,6 +492,7 @@ export function MaterialForm({
                 <input
                   value={m.attributes.weightGrams ?? ""}
                   onChange={(e) => setAttr("weightGrams", e.target.value)}
+                  onBlur={weightAttrBlur("weightGrams")}
                   placeholder="—"
                   className="w-16 rounded border border-line bg-panel2 px-2 py-1 text-right font-mono text-xs"
                 />
@@ -502,26 +515,30 @@ export function MaterialForm({
                 ))}
               </div>
             </div>
-            <Field
+            <QtyField
               label={isFilament ? "Spool size (g)" : "Full size (gauge ref)"}
-              value={m.fullQuantity == null ? "" : String(m.fullQuantity)}
-              onChange={(v) => set({ fullQuantity: num(v) })}
+              unit={m.unit}
+              value={m.fullQuantity}
+              onChange={(v) => set({ fullQuantity: v })}
             />
             <Field label="Cost ($)" value={costDollars} onChange={setCostDollars} />
-            <Field
+            <QtyField
               label={`…for how many ${m.unit || "units"}`}
-              value={String(m.costQuantity ?? "")}
-              onChange={(v) => set({ costQuantity: parseFloat(v) || 1 })}
+              unit={m.unit}
+              value={m.costQuantity ?? null}
+              onChange={(v) => set({ costQuantity: v ?? 1 })}
             />
-            <Field
+            <QtyField
               label="Low-stock threshold"
-              value={m.lowStockThreshold == null ? "" : String(m.lowStockThreshold)}
-              onChange={(v) => set({ lowStockThreshold: num(v) })}
+              unit={m.unit}
+              value={m.lowStockThreshold}
+              onChange={(v) => set({ lowStockThreshold: v })}
             />
-            <Field
+            <QtyField
               label="Reorder quantity"
-              value={m.reorderQuantity == null ? "" : String(m.reorderQuantity)}
-              onChange={(v) => set({ reorderQuantity: num(v) })}
+              unit={m.unit}
+              value={m.reorderQuantity}
+              onChange={(v) => set({ reorderQuantity: v })}
             />
             <label className="block">
               <span className="mb-1 block text-xs font-semibold tracking-widest uppercase text-mut">

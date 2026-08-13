@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { formatCost, formatQty, inventoryApi, materialColor, type Forecast, type LedgerEntry as LedgerEntryT, type TxnKind } from "./api";
+import { formatCost, formatQty, inventoryApi, materialColor, parseQtyAs, type Forecast, type LedgerEntry as LedgerEntryT, type TxnKind } from "./api";
 import { Archive, ArchiveRestore, Scale, Trash2, X } from "lucide-react";
 import { MaterialIcon } from "./MaterialIcon";
 import { WeighInSheet } from "./WeighInSheet";
@@ -45,7 +45,7 @@ export function MaterialDetailDrawer({
 
   const transact = useMutation({
     mutationFn: () => {
-      const d = parseFloat(delta);
+      const d = parseQtyAs(detail.data?.material.unit ?? "", delta) ?? NaN;
       const signed = kind === "CONSUMPTION" ? -Math.abs(d) : d;
       return inventoryApi.transact(id, signed, kind, note || undefined);
     },
@@ -172,7 +172,7 @@ export function MaterialDetailDrawer({
             <Field label="Note" value={note} onChange={setNote} />
           </div>
           <div className="w-32">
-            <Button disabled={transact.isPending || !parseFloat(delta)}>Record</Button>
+            <Button disabled={transact.isPending || !parseQtyAs(m.unit, delta)}>Record</Button>
           </div>
           <div className="w-full">
             <ErrorText>{transact.error?.message}</ErrorText>

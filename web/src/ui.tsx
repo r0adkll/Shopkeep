@@ -22,6 +22,8 @@ export function Field(props: {
   value: string;
   onChange: (v: string) => void;
   autoFocus?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }) {
   return (
     <label className="block">
@@ -32,6 +34,8 @@ export function Field(props: {
         type={props.type ?? "text"}
         value={props.value}
         autoFocus={props.autoFocus}
+        onFocus={props.onFocus}
+        onBlur={props.onBlur}
         onChange={(e) => props.onChange(e.target.value)}
         className="w-full rounded-md border border-line bg-panel2 px-3 py-2 text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent"
       />

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { formatQty, inventoryApi, materialColor, type Material } from "./api";
+import { formatQty, inventoryApi, materialColor, parseGrams, type Material } from "./api";
 
 /** Weigh-in bottom sheet (vault: Inventory UX, locked 2026-08-06): spool on
  *  the scale → gross grams → minus tare → one ADJUSTMENT event. Tare is
@@ -53,7 +53,7 @@ export function WeighInSheet({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const g = parseFloat(gross);
+  const g = parseGrams(gross) ?? NaN;
   const measured = tare != null && Number.isFinite(g) ? Math.max(0, g - tare) : null;
   // Drift is judged against the OPEN spool only — sealed spools ride along.
   const delta = measured != null ? measured - openExpected : null;
@@ -107,6 +107,7 @@ export function WeighInSheet({
               autoFocus
               value={gross}
               onChange={(e) => setGross(e.target.value)}
+              onBlur={() => { const n = parseGrams(gross); if (n != null) setGross(formatQty(n)); }}
               inputMode="decimal"
               placeholder="spool on scale…"
               className="min-w-0 flex-1 rounded-xl border-[1.5px] border-line bg-panel2 px-3.5 py-2 font-mono text-[26px] font-bold outline-none placeholder:text-[15px] placeholder:font-sans placeholder:font-normal placeholder:text-mut focus:border-accent"
@@ -128,9 +129,10 @@ export function WeighInSheet({
                 <span className="flex items-center gap-1.5 text-ink2">
                   {isBambu ? "or " : ""}empty spool weighs
                   <input value={tareInput} onChange={(e) => setTareInput(e.target.value)} inputMode="decimal" placeholder="g"
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); pickTare(parseFloat(tareInput)); } }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); pickTare(parseGrams(tareInput) ?? NaN); } }}
+                    onBlur={() => { const n = parseGrams(tareInput); if (n != null) setTareInput(formatQty(n)); }}
                     className="w-16 rounded-md border border-line bg-panel px-2 py-1 text-right font-mono text-xs outline-none focus:border-accent" />
-                  <button type="button" onClick={() => pickTare(parseFloat(tareInput))}
+                  <button type="button" onClick={() => pickTare(parseGrams(tareInput) ?? NaN)}
                     className="rounded-md border border-accent/40 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/5">
                     save
                   </button>

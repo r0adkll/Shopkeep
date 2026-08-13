@@ -148,7 +148,7 @@ fun Application.shopkeepModule(config: AppConfig, graph: AppGraph) {
             catalogRoutes(graph.productRepository)
             documentRoutes(graph.documentRepository)
             listingRoutes(graph.listingRepository)
-            integrationRoutes(graph.connectionRepository, graph.syncService, config.baseUrl)
+            integrationRoutes(graph.connectionRepository, graph.syncService, config.baseUrl, config.viewSyncCooldownSeconds * 1000)
             laneRoutes(graph.laneRepository)
             importRoutes(graph.importRepository, graph.connectionRepository)
             designRoutes(graph.designRepository)

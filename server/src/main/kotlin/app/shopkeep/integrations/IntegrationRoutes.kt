@@ -54,12 +54,16 @@ data class UspsConfigRequest(
 @Serializable
 data class StartEtsyResponse(val authUrl: String, val redirectUri: String)
 
-fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService, baseUrl: String) {
+fun Route.integrationRoutes(connections: ConnectionRepository, sync: SyncService, baseUrl: String, viewSyncCooldownMs: Long) {
     authenticate(SESSION_AUTH) {
         // Storefront config is admin-only (vault: Users & Auth role matrix).
         get("/integrations/connections") { call.respond(connections.list()) }
 
         get("/orders") { call.respond(sync.listOrders(call.request.queryParameters["includeArchived"] == "true")) }
+
+        // View-triggered freshness (D24): any signed-in role — reading the queue
+        // fresher isn't a settings change. Cooldown-gated inside SyncService.
+        post("/orders/sync") { call.respond(sync.syncOnView(viewSyncCooldownMs)) }
 
         // Phase 4 matching tooling: on-demand retro-match sweep + manual match.
         post("/orders/rematch") { call.respond(sync.rematchAll()) }

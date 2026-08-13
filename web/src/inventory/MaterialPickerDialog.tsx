@@ -8,6 +8,7 @@ import { formatQty, matchesQuery, materialColor, sortMaterials, type Material, t
 export function MaterialPickerDialog({
   all,
   title,
+  lockCategory,
   onPick,
   onReview,
   onIgnore,
@@ -16,6 +17,9 @@ export function MaterialPickerDialog({
 }: {
   all: Material[];
   title: string;
+  /** Locks the pool to one category when the use site's world is fixed
+   *  (e.g. the color→color map only ever picks filament). Chips hide. */
+  lockCategory?: string;
   onPick: (id: number) => void;
   onReview?: () => void;
   onIgnore?: () => void;
@@ -29,7 +33,10 @@ export function MaterialPickerDialog({
   const [hi, setHi] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const pool = useMemo(() => all.filter((m) => !m.archived), [all]);
+  const pool = useMemo(
+    () => all.filter((m) => !m.archived && (!lockCategory || m.category === lockCategory)),
+    [all, lockCategory],
+  );
   const cats = useMemo(() => [...new Set(pool.map((m) => m.category))].sort(), [pool]);
   const rows = sortMaterials(pool.filter((m) => (!cat || m.category === cat) && matchesQuery(m, q)), sort);
 

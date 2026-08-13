@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, Loader2, RotateCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, ArrowUpRight, Loader2, RotateCw, Trash2 } from "lucide-react";
 import { ApiError, api } from "../api";
 import { type Material, inventoryApi } from "../inventory/api";
 import { MaterialPickerDialog } from "../inventory/MaterialPickerDialog";
@@ -196,7 +196,13 @@ export function ImportEtsyPage() {
                   {l.state !== "active" && <span className="rounded-full bg-panel2 px-2 py-0.5 text-[9px] font-extrabold tracking-wider uppercase">{l.state}</span>}
                 </span>
                 {existing?.listingId != null ? (
-                  <span className="rounded-full bg-good/10 px-2.5 py-1 text-[10px] font-extrabold tracking-wider text-good">IMPORTED ✓</span>
+                  <a
+                    href={`/listings?listing=${existing.listingId}`}
+                    title="open the Shopkeep listing this import created"
+                    className="flex items-center gap-1 rounded-full bg-good/10 px-2.5 py-1 text-[10px] font-extrabold tracking-wider text-good hover:bg-good/20"
+                  >
+                    IMPORTED ✓ · OPEN <ArrowUpRight size={11} />
+                  </a>
                 ) : (
                   <span className="flex items-center gap-1.5">
                     <button
@@ -275,6 +281,7 @@ const axisMode = (a: AxisMapping) => a.mode ?? (a.slotPosition != null ? "materi
 
 function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; products: ProductSummary[]; onBack: () => void }) {
   const { imp, materials, products, onBack } = props;
+  const qc = useQueryClient();
   const [mapping, setMapping] = useState<Mapping>(imp.mapping);
   const designs = useQuery({
     queryKey: ["designs", mapping.productId],
@@ -292,7 +299,7 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
     enabled: mapping.productId != null,
   });
   const [error, setError] = useState<string | null>(null);
-  const [activated, setActivated] = useState<number | null>(null);
+  const [activated, setActivated] = useState<{ listingId: number; retroMatchedLines: number } | null>(null);
   const [picker, setPicker] = useState<{ ai: number; vi: number } | null>(null);
   const [creatingFor, setCreatingFor] = useState<{ ai: number; vi: number; name: string } | null>(null);
   const matById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
@@ -316,7 +323,11 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
       await save.mutateAsync();
       return jsonFetch<{ listingId: number; retroMatchedLines: number }>(`/api/v1/integrations/imports/${imp.id}/activate`, post({}));
     },
-    onSuccess: (r) => setActivated(r.retroMatchedLines),
+    onSuccess: (r) => {
+      setActivated(r);
+      qc.invalidateQueries({ queryKey: ["imports"] });
+      qc.invalidateQueries({ queryKey: ["listings"] });
+    },
     onError: (e) => setError(e instanceof Error ? e.message : "Activation failed"),
   });
 
@@ -329,7 +340,7 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
         <button onClick={onBack} className="flex items-center gap-1 rounded-lg border border-line bg-panel px-3 py-1 text-xs text-ink2 hover:text-ink"><ArrowLeft size={13} /> listings</button>
         <h2 className="text-[17px] font-bold">{imp.payload.title}</h2>
         {activated != null ? (
-          <span className="rounded-full bg-good/10 px-2.5 py-0.5 text-[9px] font-extrabold tracking-wider text-good">IN SYNC · {activated} ORDER LINES RETRO-MATCHED</span>
+          <span className="rounded-full bg-good/10 px-2.5 py-0.5 text-[9px] font-extrabold tracking-wider text-good">IN SYNC · {activated.retroMatchedLines} ORDER LINES RETRO-MATCHED</span>
         ) : (
           <span className="rounded-full bg-warn/10 px-2.5 py-0.5 text-[9px] font-extrabold tracking-wider text-warn">IMPORTED · NEEDS MAPPING</span>
         )}
@@ -522,17 +533,36 @@ function MappingWorkspace(props: { imp: EtsyImport; materials: Material[]; produ
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-panel2">
           <div className="h-full bg-good transition-all" style={{ width: totalCount ? `${(resolvedCount / totalCount) * 100}%` : "0%" }} />
         </div>
-        <button onClick={() => save.mutate()} disabled={save.isPending} className="rounded-lg border border-line bg-panel px-4 py-1.5 text-xs font-semibold text-ink2 hover:text-ink">
-          {save.isPending ? "Saving…" : "Save mapping draft"}
-        </button>
         <button
-          onClick={() => activate.mutate()}
-          disabled={!complete || activate.isPending || activated != null}
-          title={complete ? "listing becomes canonical; waiting orders retro-match" : "link a product and resolve every value first"}
-          className="rounded-lg bg-good px-5 py-1.5 text-sm font-bold text-white disabled:opacity-40"
+          onClick={() => save.mutate()}
+          disabled={save.isPending || activate.isPending || activated != null}
+          className="rounded-lg border border-line bg-panel px-4 py-1.5 text-xs font-semibold text-ink2 hover:text-ink disabled:opacity-40"
         >
-          {activate.isPending ? "Activating…" : activated != null ? "Activated ✓" : "Activate listing"}
+          {save.isPending && !activate.isPending ? "Saving…" : "Save mapping draft"}
         </button>
+        {activated != null ? (
+          <a
+            href={`/listings?listing=${activated.listingId}`}
+            className="flex items-center gap-1.5 rounded-lg bg-good px-5 py-1.5 text-sm font-bold text-white hover:opacity-90"
+          >
+            Activated ✓ · Open listing <ArrowRight size={14} />
+          </a>
+        ) : (
+          <button
+            onClick={() => activate.mutate()}
+            disabled={!complete || activate.isPending}
+            title={complete ? "listing becomes canonical; waiting orders retro-match" : "link a product and resolve every value first"}
+            className="flex items-center gap-1.5 rounded-lg bg-good px-5 py-1.5 text-sm font-bold text-white disabled:opacity-40"
+          >
+            {activate.isPending ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> Activating…
+              </>
+            ) : (
+              "Activate listing"
+            )}
+          </button>
+        )}
         {error && <span className="text-xs font-medium text-crit">{error}</span>}
       </div>
     </div>

@@ -92,6 +92,7 @@ object OrderLinesTable : Table("order_lines") {
     val platformListingId = text("platform_listing_id").nullable()
     val matchedListingId = long("matched_listing_id").nullable()
     val resolvedSelections = jsonb<List<app.shopkeep.catalog.ConfigSelection>>("resolved_selections", Json.Default).nullable()
+    val matchedComponents = jsonb<List<MatchedComponent>>("matched_components", Json.Default).nullable()
     val needsReview = bool("needs_review")
     val reviewReasons = jsonb<List<String>>("review_reasons", Json.Default)
     val reservedBom = jsonb<List<BomLine>>("reserved_bom", Json.Default).nullable()
@@ -174,6 +175,12 @@ data class RematchResult(val backfilled: Int, val matched: Int)
 @Serializable
 data class LineColor(val hex: String?, val name: String)
 
+/** Design/variant identity behind a matched line (D20). Resolution flattens
+ *  designs/variants into material selections, so the recognizable name is
+ *  persisted separately for display. kind: design | variant. */
+@Serializable
+data class MatchedComponent(val kind: String, val name: String)
+
 @Serializable
 data class OrderLineView(
     val id: Long,
@@ -189,6 +196,8 @@ data class OrderLineView(
     val productName: String?,
     val listingTitle: String? = null, // canonical listing name — distinguishes listings sharing a recipe
     val colors: List<LineColor> = emptyList(),
+    /** Matched design/variant names — the colorway/build the maker recognizes. */
+    val components: List<MatchedComponent> = emptyList(),
     val variations: List<EtsyVariation>,
     val personalization: List<EtsyVariation>,
 )
@@ -288,6 +297,10 @@ data class OrderDetail(
 @Serializable
 data class SyncResult(val fetched: Int, val created: Int, val matchedLines: Int, val unmatchedLines: Int)
 
+/** status: synced | fresh (within cooldown, nothing fetched) | already_running */
+@Serializable
+data class ViewSyncResult(val status: String, val created: Int)
+
 private const val PERSONALIZATION_PROPERTY_ID = 54L
 
 @SingleIn(AppScope::class)
@@ -305,6 +318,11 @@ class SyncService(
     // each other produced duplicate-key 500s on the first real ingest.
     private val syncMutex = Mutex()
 
+    // Last *attempt*, success or not — the view-sync cooldown gates on this, not
+    // sync_cursor, so a failing connection can't be hammered by every page load.
+    @Volatile
+    private var lastAttemptAtMs: Long = 0
+
     suspend fun syncAll(): Map<Long, SyncResult> {
         val results = connections.connectedIds().associateWith {
             runCatching { syncConnection(it) }.getOrElse { SyncResult(0, 0, 0, 0) }
@@ -314,7 +332,28 @@ class SyncService(
         return results
     }
 
+    /**
+     * View-triggered sync (D24): the orders screen asks for freshness on
+     * load/focus. Cooldown + tryLock make it burst-proof — at most one Etsy
+     * round per cooldown window, never queued behind an in-flight run. Skips
+     * the listing-drift check: orders freshness only, cheapest possible run.
+     */
+    suspend fun syncOnView(cooldownMs: Long): ViewSyncResult {
+        if (System.currentTimeMillis() - lastAttemptAtMs < cooldownMs) return ViewSyncResult("fresh", 0)
+        if (!syncMutex.tryLock()) return ViewSyncResult("already_running", 0)
+        try {
+            lastAttemptAtMs = System.currentTimeMillis()
+            val created = connections.connectedIds().sumOf {
+                runCatching { syncConnectionLocked(it) }.getOrElse { SyncResult(0, 0, 0, 0) }.created
+            }
+            return ViewSyncResult("synced", created)
+        } finally {
+            syncMutex.unlock()
+        }
+    }
+
     suspend fun syncConnection(connectionId: Long): SyncResult = syncMutex.withLock {
+        lastAttemptAtMs = System.currentTimeMillis()
         syncConnectionLocked(connectionId)
     }
 
@@ -414,6 +453,7 @@ class SyncService(
                         it[platformListingId] = txn.listingId?.toString()
                         it[matchedListingId] = imported?.listingId
                         it[resolvedSelections] = imported?.selections
+                        it[matchedComponents] = imported?.components
                         it[needsReview] = imported?.needsReview ?: false
                         it[reviewReasons] = imported?.reasons ?: emptyList()
                         it[reservedBom] = imported?.bom?.map { (m, q) -> BomLine(m, q) }
@@ -676,6 +716,8 @@ class SyncService(
          *  material/design resolution (incl. qty overrides + override sets),
          *  fixed slots, variant slot-deltas and extra materials. */
         val bom: List<Pair<Long, Double>>,
+        /** Designs/variants the resolution went through — names kept for display. */
+        val components: List<MatchedComponent> = emptyList(),
     )
 
     /** Etsy listing id -> Shopkeep listing (listing_level mode) -> variation
@@ -729,6 +771,7 @@ class SyncService(
         val product = products.get(listing.input.productId) ?: return null
         val reasons = mutableListOf<String>()
         val selections = mutableListOf<app.shopkeep.catalog.ConfigSelection>()
+        val components = mutableListOf<MatchedComponent>()
         val bom = mutableMapOf<Long, Double>()
         fun addBom(materialId: Long, qty: Double) { bom[materialId] = (bom[materialId] ?: 0.0) + qty }
         val orderValues = txn.variations.filter { it.propertyId != PERSONALIZATION_PROPERTY_ID }
@@ -778,7 +821,8 @@ class SyncService(
                     hit.overrideKey != null -> if (hit.overrideKey != "base") boundOverrideKey = hit.overrideKey
                     hit.variantId != null -> {
                         val v = designs.variant(hit.variantId!!)
-                        if (v == null) reasons += "the variant behind “$varVal” no longer exists" else variantAdj = v.adjustments
+                        if (v == null) reasons += "the variant behind “$varVal” no longer exists"
+                        else { variantAdj = v.adjustments; components += MatchedComponent("variant", v.name) }
                     }
                     hit.designId != null -> pendingDesigns += hit.designId!!
                     hit.materialId != null -> addSelection(axis.productSlotPosition, hit.materialId!!, slotQty(axis.productSlotPosition))
@@ -792,7 +836,8 @@ class SyncService(
                 "design" -> res.refId?.let { pendingDesigns += it } ?: run { reasons += "the design behind “$varVal” isn’t set" }
                 "variant" -> {
                     val v = res.refId?.let { designs.variant(it) }
-                    if (v == null) reasons += "the variant behind “$varVal” no longer exists" else variantAdj = v.adjustments
+                    if (v == null) reasons += "the variant behind “$varVal” no longer exists"
+                    else { variantAdj = v.adjustments; components += MatchedComponent("variant", v.name) }
                 }
                 "ignore" -> {}
                 "review" -> reasons += "“$varVal” (${axis.displayName}) is set to review-per-order — pick its materials by hand"
@@ -804,6 +849,7 @@ class SyncService(
         for (designId in pendingDesigns) {
             val d = designs.design(designId)
             if (d == null) { reasons += "a mapped design was deleted from the product"; continue }
+            components += MatchedComponent("design", d.name)
             val set = boundOverrideKey?.let { k -> d.overrideSets.firstOrNull { it.key.equals(k, true) } }
                 ?: d.overrideSets.firstOrNull { os -> orderValues.any { it.value.equals(os.key, ignoreCase = true) } }
             for (a in (set?.assignments ?: d.assignments)) {
@@ -817,7 +863,8 @@ class SyncService(
             if (res.kind != "variant" || variantAdj != null) continue
             if (orderValues.any { it.name.equals(res.axis, true) && it.value.equals(res.value, true) }) {
                 val v = res.refId?.let { designs.variant(it) }
-                if (v != null) variantAdj = v.adjustments else reasons += "the variant behind “${res.value}” no longer exists"
+                if (v != null) { variantAdj = v.adjustments; components += MatchedComponent("variant", v.name) }
+                else reasons += "the variant behind “${res.value}” no longer exists"
             }
         }
         // fixed slots
@@ -845,6 +892,7 @@ class SyncService(
         return ImportedResolution(
             listing.id, listing.input.productId, selections, reasons.isNotEmpty(), reasons,
             bom.filterValues { it > 0 }.toList(),
+            components = components,
         )
     }
 
@@ -907,6 +955,7 @@ class SyncService(
             OrderLinesTable.update({ OrderLinesTable.id eq l[OrderLinesTable.id] }) {
                 it[matchedListingId] = r.listingId
                 it[resolvedSelections] = r.selections
+                it[matchedComponents] = r.components
                 it[needsReview] = r.needsReview
                 it[reviewReasons] = r.reasons
                 it[reservedBom] = if (!dead && order[OrdersTable.completedAt] == null) r.bom.map { (m, q) -> BomLine(m, q) } else null
@@ -1435,6 +1484,7 @@ class SyncService(
                         colors = l[OrderLinesTable.listingConfigurationId]?.let { configInfo[it]?.third }
                             ?: l[OrderLinesTable.resolvedSelections]?.map { s -> LineColor(s.color, s.materialName) }
                             ?: emptyList(),
+                        components = l[OrderLinesTable.matchedComponents] ?: emptyList(),
                         variations = l[OrderLinesTable.variations],
                         personalization = l[OrderLinesTable.personalization],
                     )
